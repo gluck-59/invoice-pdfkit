@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
+const path = require("path");
 const { t, config, setDocHelper, docH, dt } = require("./globals");
 
 const Title = require("./sections/title");
@@ -18,6 +19,8 @@ const {
 } = require("./sections/terms");
 
 const localesPath = __dirname + "/../locales";
+const defaultFont = path.join(__dirname, "../fonts/OpenSans-Regular.ttf");
+const defaultFontBold = path.join(__dirname, "../fonts/OpenSans-ExtraBold.ttf");
 const getLanguages = () => {
   if (!config.languageOptions)
     config.languageOptions = fs.readdirSync(localesPath);
@@ -32,8 +35,8 @@ const init = (settings) => {
   config.locale = settings.locale || "en-US";
   config.currency = settings.currency;
   config.page = settings.page;
-  config.fontName = settings.fontName || "Helvetica";
-  config.fontNameBold = settings.fontNameBold || "Helvetica-Bold";
+  config.fontName = settings.fontName || defaultFont;
+  config.fontNameBold = settings.fontNameBold || defaultFontBold;
   config.fontSize = settings.fontSize || 11;
   config.defaultMargins = {
     top: 30,
@@ -51,10 +54,16 @@ const ret = (...args) => generate((docType = dt.RETURN), ...args);
 const receipt = (...args) => generate((docType = dt.RECEIPT), ...args);
 const refund = (...args) => generate((docType = dt.REFUND), ...args);
 
-const generate = (docType, order, payment) => {
-  if (!order || typeof order !== "object")
-    throw Error("Missing object parameter: order");
-  if (!config.initialized) throw Error("Need to init() before generate()");
+const generate = (docType, order, payment) =>
+  new Promise((resolve, reject) => {
+    if (!order || typeof order !== "object") {
+      reject(Error("Missing object parameter: order"));
+      return;
+    }
+    if (!config.initialized) {
+      reject(Error("Need to init() before generate()"));
+      return;
+    }
   config.docType = docType;
   const doc = new PDFDocument({
     bufferPages: true,
@@ -63,6 +72,7 @@ const generate = (docType, order, payment) => {
     ...config.page,
   });
   setDocHelper(doc);
+  doc.font(config.fontName);
   doc.page.margins.bottom += getPageIndicatorHeight(doc);
   //
   // Section
@@ -99,7 +109,7 @@ const generate = (docType, order, payment) => {
   // Section
   const itemsData = calcItems(order);
   const totalsData = calcTotals(doc, order, itemsData);
-  const pricesPos = Prices(doc, order, itemsData, totalsData);
+  Prices(doc, order, itemsData, totalsData);
   const totalsPos = Totals(doc, order, totalsData);
   const roomTotals = docH.printWidth - totalsPos.width;
   if (roomTotals > docH.printWidth / 2) {
@@ -127,10 +137,12 @@ const generate = (docType, order, payment) => {
   doc.page.margins.bottom -= getPageIndicatorHeight(doc);
   PageNumbers(doc);
   doc.page.margins.top /= 2;
+  const chunks = [];
+  doc.on("data", (chunk) => chunks.push(chunk));
+  doc.on("end", () => resolve(Buffer.concat(chunks)));
+  doc.on("error", reject);
   doc.end();
-  const data = doc.read();
-  return data;
-};
+  });
 
 module.exports = {
   getLanguages,

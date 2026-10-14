@@ -4,8 +4,8 @@ const fs = require("fs");
 const folder = "./test/";
 const filename = "output.pdf";
 const yourCompany: CompanyInfo = {
-  company: "Admiral Motors",
-  addr1: "2517 N Oak Ave",
+  company: "My Company",
+  addr1: "Test st. 101",
   city: "Fort Meade",
   zip: "FL 33941",
   state: "Florida",
@@ -156,7 +156,7 @@ const payment = {
 
 console.log("Language options: " + tradePDF.getLanguages());
 tradePDF.init({
-  logo: fs.readFileSync("test/logo.jpg"),
+  logo: fs.readFileSync("test/cat-white.png"),
   company: yourCompany,
   language: "en",
   locale: "en-US",
@@ -173,25 +173,27 @@ tradePDF.init({
 //console.log(pdfData.toString("base64"));
 let pdfData;
 
-pdfData = tradePDF.quote(order, payment);
+(async () => {
+pdfData = await tradePDF.quote(order, payment);
 fs.writeFileSync(folder + "0_quote.pdf", pdfData);
 
-pdfData = tradePDF.invoice(order, payment);
+pdfData = await tradePDF.invoice(order, payment);
 fs.writeFileSync(folder + "1_invoice.pdf", pdfData);
 
-pdfData = tradePDF.packing(order);
+pdfData = await tradePDF.packing(order);
 fs.writeFileSync(folder + "2_packing.pdf", pdfData);
 
-pdfData = tradePDF.return(order);
+pdfData = await tradePDF.return(order);
 fs.writeFileSync(folder + "3_return.pdf", pdfData);
 
-pdfData = tradePDF.receipt(order, payment);
+pdfData = await tradePDF.receipt(order, payment);
 fs.writeFileSync(folder + "4_receipt.pdf", pdfData);
 
-pdfData = tradePDF.refund(order, payment);
+pdfData = await tradePDF.refund(order, payment);
 fs.writeFileSync(folder + "5_refund.pdf", pdfData);
 
 console.log("Successfully generated pdf(s)");
+})();
 
 /*
 console.log("Language options: " + tradePDF.getLanguages());

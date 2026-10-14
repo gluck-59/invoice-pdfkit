@@ -41,8 +41,11 @@ let arg,
 const drawFlexTable = (drawTableArguments) => {
   arg = drawTableArguments;
   doc = arg.doc;
-  plainFont = arg.fontName || "Helvetica";
-  boldFont = arg.fontNameBold || "Helvetica-Bold";
+  plainFont =
+    arg.fontName || require("path").join(__dirname, "../fonts/OpenSans-Regular.ttf");
+  boldFont =
+    arg.fontNameBold ||
+    require("path").join(__dirname, "../fonts/OpenSans-ExtraBold.ttf");
   doubleXMargin = 2 * arg.cellMarginX;
   grayCounter = !arg.flipGray;
   columnWidths = getBaseWidths();
@@ -65,7 +68,7 @@ const drawFlexTable = (drawTableArguments) => {
 
 const printHeader = () => {
   if (arg.header) {
-    if (arg.boldHeader != false) doc.font(boldFont);
+    if (arg.boldHeader !== false) doc.font(boldFont);
     printRow(arg.header, false);
     doc.font(plainFont);
   }
@@ -73,7 +76,7 @@ const printHeader = () => {
 
 const printFooter = () => {
   if (arg.footer) {
-    if (arg.boldFooter != false) doc.font(boldFont);
+    if (arg.boldFooter !== false) doc.font(boldFont);
     printRow(arg.footer, false);
     doc.font(plainFont);
   }
@@ -100,15 +103,12 @@ const printRow = (row, allowWriting) => {
     doc.addPage();
     if (arg.headerEveryPage) printHeader();
   }
-  // Paint gray background
-  const basePosY = doc.y;
+  // Paint gray background strictly inside this row's bounds
+  const rowTop = doc.y;
   grayCounter = !grayCounter;
   const gap = currentFontHeight - doc._fontSize;
   if (grayCounter) {
-    doc
-      .rect(tStart, basePosY - gap, tWidth, maxCellHeight)
-      .fill("#eee")
-      .fill("black");
+    doc.rect(tStart, rowTop, tWidth, maxCellHeight).fill("#eee").fill("black");
   }
   // Start printing text
   row.forEach((cell, i) => {
@@ -121,17 +121,18 @@ const printRow = (row, allowWriting) => {
       const height = cellHeights[i] - gap - 2;
       //console.log(cell, accumPosX, maxCellHeight, marginY, width, align);
       doc
-        .formText("item", accumPosX + 2, basePosY + marginY, width, height, {
+        .formText("item", accumPosX + 2, rowTop + marginY, width, height, {
           align,
           value: cell,
         })
-        .rect(accumPosX + 2, basePosY + marginY, width, height)
+        .rect(accumPosX + 2, rowTop + marginY, width, height)
         .stroke();
     } else if (cell || cell === 0) {
-      doc.text(cell, accumPosX, basePosY + marginY, { width, align });
+      doc.text(cell, accumPosX, rowTop + marginY, { width, align });
     }
-    doc.y += marginY;
   });
+  // Advance exactly to the bottom of this row (no per-cell drift)
+  doc.y = rowTop + maxCellHeight;
 };
 
 const growColumnsToLimits = () => {
@@ -221,12 +222,12 @@ const limitTable = () => {
 const getBaseWidths = () => {
   const columnWidths = [];
   if (arg.header) {
-    if (arg.boldHeader != false) doc.font(boldFont);
+    if (arg.boldHeader !== false) doc.font(boldFont);
     updateColumnWidths(columnWidths, arg.header);
     doc.font(plainFont);
   }
   if (arg.footer) {
-    if (arg.boldFooter != false) doc.font(boldFont);
+    if (arg.boldFooter !== false) doc.font(boldFont);
     updateColumnWidths(columnWidths, arg.footer);
     //console.log(columnWidths);
     doc.font(plainFont);

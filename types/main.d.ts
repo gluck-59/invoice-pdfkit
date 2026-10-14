@@ -94,12 +94,12 @@ type Payment = {
 declare module "TradePDF" {
   function getLanguages(): string[] | Buffer[] | fs.Dirent[];
   function init(settings?: Settings): void;
-  function quote(order?: Order): string | Buffer;
-  function invoice(order?: Order, payment?: Payment): string | Buffer;
-  function packing(order?: Order): string | Buffer;
-  function ret(order?: Order): string | Buffer;
-  function receipt(order?: Order, payment?: Payment): string | Buffer;
-  function refund(order?: Order, payment?: Payment): string | Buffer;
+  function quote(order?: Order): Promise<Buffer>;
+  function invoice(order?: Order, payment?: Payment): Promise<Buffer>;
+  function packing(order?: Order): Promise<Buffer>;
+  function ret(order?: Order): Promise<Buffer>;
+  function receipt(order?: Order, payment?: Payment): Promise<Buffer>;
+  function refund(order?: Order, payment?: Payment): Promise<Buffer>;
   export = {
     getLanguages,
     init,
