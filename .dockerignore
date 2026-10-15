@@ -1,0 +1,12 @@
+node_modules
+.git
+.idea/
+.DS_Store
+test/
+screenshots/
+образцы/
+*.pdf
+.env
+demo*.js
+demo*.pdf
+php-app/vendor/

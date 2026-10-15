@@ -1,0 +1,73 @@
+services:
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      php:
+        condition: service_started
+      node:
+        condition: service_healthy
+    networks:
+      - appnet
+
+  php:
+    build:
+      context: ./docker/php
+    volumes:
+      - ./php-app/public:/var/www/html:ro
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-invoices}
+      MYSQL_USER: ${MYSQL_USER:-invoices}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-invoices}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - appnet
+
+  node:
+    build:
+      context: .
+      dockerfile: ./docker/node/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      RENDER_TOKEN: ${RENDER_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - appnet
+
+  mysql:
+    image: mysql:8.4
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-invoices}
+      MYSQL_USER: ${MYSQL_USER:-invoices}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-invoices}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - appnet
+
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  mysql-data:

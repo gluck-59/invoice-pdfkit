@@ -1,0 +1,124 @@
+<!doctype html>
+<!--
+  HEADER prototype (fixed top zone). Edit freely in any HTML editor.
+  Values are literal {{placeholders}} (same names as types/main.d.ts).
+  Labels switch language via data-i18n + /locales/*.json.
+  The <select> is preview-only: hidden in print, never goes to PDF.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice header prototype</title>
+<style>
+  @font-face {
+    font-family: "Open Sans";
+    src: url("/fonts/OpenSans-Regular.ttf") format("truetype");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Open Sans";
+    src: url("/fonts/OpenSans-ExtraBold.ttf") format("truetype");
+    font-weight: 800;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Open Sans", sans-serif;
+    font-size: 11pt;
+    color: #000;
+  }
+  .header-zone {
+    width: 678px; /* A4 minus pdfkit margins (left 54pt / right 30pt) */
+    min-height: 400px; /* fixed zone — tune in editor */
+    padding: 0;
+    position: relative;
+  }
+  .noprint { margin-bottom: 8px; }
+  h1.doc-title { font-size: 33pt; font-weight: 400; margin: 12px 0 24px 0; }
+  .logo {
+    position: absolute;
+    top: 0;
+    right: 0;
+    max-width: 180px;
+    max-height: 120px;
+  }
+  .cols { display: flex; gap: 16px; }
+  .col { flex: 1; }
+  .right { text-align: right; }
+  .small { font-size: 9.9pt; }
+  .block-title { font-weight: 800; font-size: 9.9pt; }
+  .order { margin-top: 16px; }
+  .order .row { display: flex; }
+  .order .label { width: 130px; }
+  @media print {
+    .noprint { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="header-zone">
+  <div class="noprint">
+    <label>Language:
+      <select id="lang">
+        <option value="de">de</option>
+        <option value="en">en</option>
+        <option value="nl">nl</option>
+        <option value="ru">ru</option>
+      </select>
+    </label>
+    <span class="small">(preview only, not printed)</span>
+  </div>
+
+  <h1 class="doc-title" data-i18n="invoice">Invoice</h1>
+  <img class="logo" src="/test/cat-white.png" alt="{{company.company}} logo">
+
+  <div class="cols">
+    <div class="col">
+      <div class="block-title" data-i18n="bill_to">Bill To</div>
+      <div>{{bill.company}}</div>
+      <div><span data-i18n="attn">attn.</span> {{bill.name}}</div>
+      <div>{{bill.addr1}}</div>
+      <div>{{bill.addr2}}</div>
+      <div>{{bill.city}} {{bill.zip}}</div>
+      <div>{{bill.state}} {{bill.country}}</div>
+      <div>{{bill.email}}</div>
+    </div>
+    <div class="col right small">
+      <div>{{company.company}}</div>
+      <div>{{company.addr1}}</div>
+      <div>{{company.addr2}}</div>
+      <div>{{company.city}} {{company.zip}}</div>
+      <div>{{company.state}} {{company.country}}</div>
+      <div>{{company.email}}</div>
+      <div>{{company.web}}</div>
+      <div>{{company.tel}}</div>
+      <div>{{company.account}}</div>
+      <div>{{company.bankID}}</div>
+      <div>{{company.taxID}}</div>
+      <div>{{company.registration}}</div>
+    </div>
+  </div>
+
+  <div class="cols" style="margin-top:12px">
+    <div class="col">
+      <div class="block-title" data-i18n="ship_to">Ship To</div>
+      <div>{{ship.company}}</div>
+      <div><span data-i18n="attn">attn.</span> {{ship.name}}</div>
+      <div>{{ship.addr1}}</div>
+      <div>{{ship.city}} {{ship.zip}}</div>
+      <div>{{ship.country}}</div>
+    </div>
+    <div class="col order">
+      <div class="row"><div class="label" data-i18n="order_id">Order #</div><div>{{order.id}}</div></div>
+      <div class="row"><div class="label" data-i18n="order_ref">Reference #</div><div>{{order.ref}}</div></div>
+      <div class="row"><div class="label" data-i18n="order_client">Client #</div><div>{{order.clientID}}</div></div>
+      <div class="row"><div class="label" data-i18n="order_salesrep">Sales rep.</div><div>{{order.salesRep}}</div></div>
+      <div class="row"><div class="label" data-i18n="order_created">Created on</div><div>{{order.date.created}}</div></div>
+      <div class="row"><div class="label" data-i18n="order_due">Due date</div><div>{{order.date.due}}</div></div>
+    </div>
+  </div>
+</div>
+<script src="/preview/i18n.js"></script>
+<script>window.PdfI18n.init();</script>
+</body>
+</html>
