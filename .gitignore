@@ -6,3 +6,5 @@ node_modules
 demo-invoice*.pdf
 php-app/vendor/
 mysql-data/
+docker-compose.yml
+Dockerfile
