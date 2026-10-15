@@ -1,2 +1,8 @@
 node_modules
 *.yaml
+.DS_Store
+.idea/
+.env
+demo-invoice*.pdf
+php-app/vendor/
+mysql-data/
