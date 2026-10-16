@@ -1,9 +1,13 @@
 // Shared i18n for the HTML prototypes (browser only, no build step).
-// Loads translations from /locales/{lang}/translation.json (served by node).
+// Language list comes from GET /api/languages (reads locales/ on the server).
+// Single source of truth for the chosen language is the "pdf-lang" cookie
+// (readable by both JS and PHP). Until the list loads, the select keeps
+// its single "en" fallback option.
 (function () {
   "use strict";
 
-  var LANGS = ["de", "en", "nl", "ru"];
+  var FALLBACK_LANGS = ["en"];
+  var LANGS = FALLBACK_LANGS.slice();
   var KEY = "pdf-lang";
 
   function baseLang(tag) {
@@ -12,13 +16,45 @@
     return LANGS.indexOf(b) !== -1 ? b : null;
   }
 
-  function currentLang() {
+  function getCookie(name) {
     try {
-      var saved = localStorage.getItem(KEY);
-      if (saved && LANGS.indexOf(saved) !== -1) return saved;
+      var parts = (document.cookie || "").split(";");
+      for (var i = 0; i < parts.length; i++) {
+        var kv = parts[i].split("=");
+        if (kv[0].trim() === name) return decodeURIComponent((kv[1] || "").trim());
+      }
     } catch (e) {}
+    return null;
+  }
+
+  function setCookie(name, value) {
+    document.cookie =
+      name + "=" + encodeURIComponent(value) + ";path=/;SameSite=Lax";
+  }
+
+  // Single supported URL param: ?lang=xx. Everything else
+  // (?locale=, ?language=, ...) is ignored.
+  function queryLang() {
+    try {
+      var m = /[?&]lang=([^&#]*)/.exec(window.location.search || "");
+      if (!m) return null;
+      return baseLang(decodeURIComponent(m[1]));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function storedLang() {
+    var saved = getCookie(KEY);
+    return saved && LANGS.indexOf(saved) !== -1 ? saved : null;
+  }
+
+  function currentLang() {
     return (
-      baseLang(navigator.language || navigator.userLanguage) || "en"
+      queryLang() ||
+      storedLang() ||
+      baseLang(navigator.language || navigator.userLanguage) ||
+      "en"
     );
   }
 
@@ -44,39 +80,85 @@
       });
   }
 
+  // Rebuild <select> options from the server list, replacing the fallback.
+  // No-op when there is no select on the page (footer.html).
+  function rebuildSelect(langs) {
+    var sel = document.getElementById("lang");
+    if (!sel) return;
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    langs.forEach(function (l) {
+      var opt = document.createElement("option");
+      opt.value = l;
+      opt.textContent = l;
+      sel.appendChild(opt);
+    });
+  }
+
+  function loadLangList() {
+    return fetch("/api/languages")
+      .then(function (r) {
+        if (!r.ok) throw new Error("languages list failed");
+        return r.json();
+      })
+      .then(function (data) {
+        var list = (data && data.languages) || [];
+        list = list
+          .map(String)
+          .filter(function (l, i, a) {
+            return l && a.indexOf(l) === i;
+          })
+          .sort();
+        if (!list.length) throw new Error("empty languages list");
+        if (list.indexOf("en") === -1) list.unshift("en");
+        LANGS = list;
+        rebuildSelect(LANGS);
+      })
+      .catch(function () {
+        // Server unreachable (e.g. file:// preview): keep the "en" fallback.
+        LANGS = FALLBACK_LANGS.slice();
+      });
+  }
+
   function setLang(lang, save) {
     if (LANGS.indexOf(lang) === -1) lang = "en";
-    if (save !== false) {
-      try {
-        localStorage.setItem(KEY, lang);
-      } catch (e) {}
-    }
+    if (save !== false) setCookie(KEY, lang);
     var sel = document.getElementById("lang");
     if (sel) sel.value = lang;
     return loadLang(lang);
   }
 
-  // Cross-frame sync (index.html embeds header/footer via iframes)
-  window.addEventListener("storage", function (e) {
-    if (e.key === KEY && e.newValue) loadLang(e.newValue);
-  });
-
   window.PdfI18n = {
-    LANGS: LANGS,
+    langs: function () {
+      return LANGS.slice();
+    },
     currentLang: currentLang,
     setLang: setLang,
     init: function () {
       var sel = document.getElementById("lang");
       if (sel) {
         sel.addEventListener("change", function () {
-          setLang(sel.value);
+          // Persist the explicit choice, then reload the whole preview
+          // shell so every iframe picks it up from the cookie.
+          setLang(sel.value, true).then(function () {
+            try {
+              window.top.location.reload();
+            } catch (e) {}
+          });
         });
       }
-      return setLang(currentLang(), false).then(function () {
-        // persist the resolved default so other frames pick it up
-        try {
-          localStorage.setItem(KEY, window.__pdfLang);
-        } catch (e) {}
+      return loadLangList().then(function () {
+        var q = queryLang();
+        if (q) {
+          // Explicit ?lang= wins and is persisted so sibling
+          // iframes (no query string) pick it up via the cookie.
+          return setLang(q, true);
+        }
+        var stored = storedLang();
+        if (!stored) {
+          // Persist the resolved default so PHP sees the same language.
+          return setLang(currentLang(), true);
+        }
+        return setLang(stored, false);
       });
     },
   };

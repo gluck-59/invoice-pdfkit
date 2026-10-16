@@ -18,6 +18,7 @@ services:
       context: ./docker/php
     volumes:
       - ./php-app/public:/var/www/html:ro
+      - ./locales:/var/www/locales:ro
     environment:
       MYSQL_HOST: mysql
       MYSQL_DATABASE: ${MYSQL_DATABASE:-invoices}
@@ -33,6 +34,10 @@ services:
     build:
       context: .
       dockerfile: ./docker/node/Dockerfile
+    volumes:
+      # Dev: host public/ masks the image copy, so prototype edits apply
+      # without rebuilding the image.
+      - ./public:/app/public:ro
     environment:
       NODE_ENV: production
       PORT: 3000

@@ -54,23 +54,22 @@
     .noprint { display: none !important; }
   }
 </style>
+<script src="/preview/i18n.js" defer></script>
+<script defer>window.addEventListener("DOMContentLoaded", function () { window.PdfI18n.init(); });</script>
 </head>
 <body>
 <div class="header-zone">
   <div class="noprint">
     <label>Language:
       <select id="lang">
-        <option value="de">de</option>
+        <!-- fallback only; options rebuilt by i18n.js from /api/languages -->
         <option value="en">en</option>
-        <option value="nl">nl</option>
-        <option value="ru">ru</option>
       </select>
     </label>
-    <span class="small">(preview only, not printed)</span>
   </div>
 
   <h1 class="doc-title" data-i18n="invoice">Invoice</h1>
-  <img class="logo" src="/test/cat-white.png" alt="{{company.company}} logo">
+  <img class="logo" src="/preview/img/logo-fallback.jpg" alt="{{company.company}} logo">
 
   <div class="cols">
     <div class="col">
@@ -118,7 +117,5 @@
     </div>
   </div>
 </div>
-<script src="/preview/i18n.js"></script>
-<script>window.PdfI18n.init();</script>
 </body>
 </html>

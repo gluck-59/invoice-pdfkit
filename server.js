@@ -13,12 +13,93 @@ const RENDER_TOKEN = process.env.RENDER_TOKEN || "";
 const BODY_LIMIT = 10 * 1024 * 1024; // 10 MB
 
 const ROOT = __dirname;
-const STATIC_MAP = {
-  "/preview/": "public",
-  "/locales/": "locales",
-  "/fonts/": "fonts",
-  "/test/": "test", // demo images (logo/QR) for prototypes only
+
+// Static: URL path == directory name, no aliasing.
+// /preview/* -> public/* with {{placeholders}} filled from DEMO data below.
+// /template/* -> public/* raw (placeholders intact, for editing).
+// /locales/*, /fonts/* served as-is.
+// /test/ is deliberately NOT served (excluded from the image).
+const STATIC_DIRS = new Set(["preview", "template", "locales", "fonts"]);
+const STATIC_ROOT = { preview: "public", template: "public", locales: "locales", fonts: "fonts" };
+
+// Demo data for /preview/ (same values as test/run.js).
+const DEMO = {
+  company: {
+    company: "My Company",
+    addr1: "18th St.",
+    city: "Fort Meade",
+    zip: "FL 33941",
+    state: "Florida",
+    country: "United States of America",
+    tel: "+1 863-285-5552",
+    web: "https://admiralmotors.co.uk",
+    email: "admiralmotors@protonmail.com",
+    account: "NL33 ABNA 0383 9284 93",
+    bankID: "BIC ABNABNL2AXXX",
+    registration: "K.v.K. 0441.956.713",
+    taxID: "BTW nr. BE0423798694",
+    termsURL: "https://shopping-example.com/terms",
+    terms: ["- Only valid if paid on time", "- Pay on time for real please"],
+    tagline: "Quality machinery for life - Thank you for doing business.",
+  },
+  bill: {
+    company: "Super Grip Tires BV",
+    name: "Jan van Eihof",
+    addr1: "Dorpstraat 587",
+    city: "3884AR Leusden",
+    email: "finance@supergriptires.com",
+  },
+  ship: {
+    company: "SGT Logistics Netherlands",
+    name: "Tony Forklift",
+    addr1: "Industrieweg 43",
+    city: "4432GT Arnhem",
+    state: "Gelderland",
+    country: "The Netherlands",
+  },
+  order: {
+    id: "Y4TIX8GX",
+    ref: "V1002",
+    clientID: "C345524U",
+    salesRep: "Georgina",
+    date: { created: "2022-08-01", due: "2022-06-13" },
+  },
+  page: "1",
+  pages: "1",
 };
+
+const DEMO_ITEMS = [
+  { id: "if3moh3f", desc: "Uber Expensive Watch", qty: "14", price: "458845.25" },
+  { id: "roh0aith", desc: "Behringer Audio Digital Mixing Console", qty: "8", price: "158845.25" },
+  { id: "k2d822e2", desc: "Expensive Watch", qty: "18", price: "258845.25" },
+];
+
+function demoVal(path) {
+  let v = DEMO;
+  for (const k of path.split(".")) {
+    if (v == null || typeof v !== "object" || !(k in v)) return "";
+    v = v[k];
+  }
+  if (Array.isArray(v)) return v.join(" ");
+  return v == null ? "" : String(v);
+}
+
+function fillDemo(html) {
+  return html.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (_, k) => demoVal(k));
+}
+
+function demoItemsTable() {
+  const rows = DEMO_ITEMS.map(
+    (it) =>
+      `<tr><td>${it.id}</td><td>${it.desc}</td><td>${it.qty}</td><td>${it.price}</td></tr>`
+  ).join("");
+  return (
+    `<table style="width:100%;border-collapse:collapse;font-size:10pt">` +
+    `<tr><td><b>Code</b></td><td><b>Description</b></td><td><b>Qty</b></td><td><b>Price</b></td></tr>` +
+    rows +
+    `</table>`
+  );
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -55,24 +136,14 @@ function sendJson(res, status, obj) {
 
 function serveStatic(req, res) {
   const urlPath = req.url.split("?")[0];
-  let dir = null;
-  let rel = null;
-  for (const [prefix, mapped] of Object.entries(STATIC_MAP)) {
-    if (urlPath === prefix.slice(0, -1) || urlPath.startsWith(prefix)) {
-      dir = path.join(ROOT, mapped);
-      rel = urlPath === prefix.slice(0, -1) ? "index.html" : urlPath.slice(prefix.length) || "index.html";
-      break;
-    }
-  }
-  if (urlPath === "/") {
-    res.writeHead(302, { Location: "/preview/" });
-    res.end();
-    return;
-  }
-  if (!dir) {
+  // "/" serves the preview shell directly (no redirect).
+  const first = urlPath === "/" ? "preview" : urlPath.slice(1).split("/", 1)[0];
+  if (!STATIC_DIRS.has(first)) {
     sendJson(res, 404, { error: "not found" });
     return;
   }
+  const dir = path.join(ROOT, STATIC_ROOT[first]);
+  const rel = urlPath === "/" || urlPath === `/${first}` ? "index.html" : urlPath.slice(first.length + 2) || "index.html";
   const safe = path.normalize(rel).replace(/^(\.\.[/\\])+/, "");
   const file = path.join(dir, safe);
   if (!file.startsWith(dir)) {
@@ -88,6 +159,30 @@ function serveStatic(req, res) {
     const ext = path.extname(file).toLowerCase();
     if (!MIME[ext] || (dir !== path.join(ROOT, "public") && ext === ".js")) {
       sendJson(res, 403, { error: "forbidden" });
+      return;
+    }
+    if (ext === ".html" && (first === "preview" || first === "template")) {
+      fs.readFile(file, "utf8", (readErr, html) => {
+        if (readErr) {
+          sendJson(res, 404, { error: "not found" });
+          return;
+        }
+        if (first === "preview") {
+          html = fillDemo(html);
+          if (rel === "index.html") {
+            html = html.replace(
+              /<div class="body-stub">[\s\S]*?<\/div>/,
+              `<div class="body-stub" style="display:block">${demoItemsTable()}</div>`
+            );
+          }
+        }
+        const body = Buffer.from(html, "utf8");
+        res.writeHead(200, {
+          "Content-Type": MIME[ext],
+          "Content-Length": body.length,
+        });
+        res.end(body);
+      });
       return;
     }
     res.writeHead(200, { "Content-Type": MIME[ext] });
@@ -177,6 +272,28 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && urlPath === "/health") {
       sendJson(res, 200, { status: "ok", version: "1.0.11", node: process.version });
+      return;
+    }
+
+    // Dynamic language list for the preview <select> (fresh readdir every
+    // request — no cache, so a newly added locales/<lang>/ shows up at once).
+    // Falls back to ["en"] client-side if unreachable.
+    if (req.method === "GET" && urlPath === "/api/languages") {
+      try {
+        const localesDir = path.join(ROOT, "locales");
+        const langs = fs
+          .readdirSync(localesDir, { withFileTypes: true })
+          .filter(
+            (e) =>
+              e.isDirectory() &&
+              fs.existsSync(path.join(localesDir, e.name, "translation.json"))
+          )
+          .map((e) => e.name)
+          .sort();
+        sendJson(res, 200, { languages: langs });
+      } catch (e) {
+        sendJson(res, 500, { error: "cannot list languages" });
+      }
       return;
     }
 
