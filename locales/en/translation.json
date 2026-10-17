@@ -8,7 +8,6 @@
 
   "bill_to": "Bill To",
   "ship_to": "Ship To",
-  "attn": "attn.",
 
   "order_id": "Order #",
   "order_ref": "Reference #",
@@ -159,5 +158,6 @@
   "cf_taxID": "Tax ID",
   "cf_termsURL": "Terms URL",
   "cf_terms": "Terms (one per line)",
-  "cf_tagline": "Tagline"
+  "cf_tagline": "Tagline",
+  "add_items_for_total": "Add items to calculate the total"
 }

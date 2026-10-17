@@ -19,7 +19,7 @@
     margin: 60px 0;
     border: 1px solid var(--line);
   }
-  .muted { color: gray; }
+  .muted { color: gray; font-weight: 100;}
   a { color: inherit; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
   /* nav */
@@ -195,7 +195,7 @@
     font-size: 14px;
   }
   .cab-h { font-size: 20px; margin: 36px 0 14px; }
-  .cab-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .cab-table { width: 100%; max-width: 720px; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
   .cab-table th, .cab-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; font-size: 15px; }
   .cab-table tr.sel td { background: rgba(201,161,59,.08); }
   .cab-table a { color: var(--acc); }

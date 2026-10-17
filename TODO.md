@@ -54,13 +54,27 @@
 
 ## Шаги внедрения
 
-1. [ ] Адаптер в этом репозитории: `server.js` (A) и/или `cli.js` (B):
-   parse JSON → `init` → `await generate` → PDF/ошибка. Плюс `GET /health`.
-2. [ ] PHP-клиент `PdfRenderer::renderInvoice($company, $order, $payment): string $pdfBytes`
-   (curl/exec, проброс ошибок, лог с `requestId`).
-3. [ ] Деплой: Node рядом с PHP, супервизор, секрет в env, localhost-only.
-4. [ ] Сквозной тест PHP→Node (RU-заказ с Open Sans → PDF открывается, текст извлекается).
+1. [x] Адаптер в этом репозитории: `server.js` (вариант A) —
+   `POST /api/render/invoice` + `GET /health`, токен `X-Render-Token`.
+2. [x] PHP-клиент: `php-app/public/index.php` собирает данные текущего
+   пользователя и постит JSON в node; `GET /preview/` отдаёт PDF inline.
+3. [x] Деплой: `docker-compose.yml` (nginx/php/node/mysql), секрет
+   `RENDER_TOKEN` в env, node без доступа к БД.
+4. [x] Сквозной тест PHP→Node (RU-заказ с Open Sans → PDF открывается, текст извлекается).
 5. [ ] Тест изоляции (запрос A не видит данные B) + мини-нагрузочный тест для выбора A vs B.
+
+## Хранение данных MySQL (Docker)
+
+- Данные клиентов лежат в именованном томе `invoice-pdfkit_mysql-data`
+  (`mysql-data` в `docker-compose.yml`); `docker build` / `up` том не трогают.
+- Потеря возможна только при удалении тома: `docker compose down -v`,
+  `docker volume prune` / `docker system prune --volumes`, либо кнопка **Down**
+  в PhpStorm (по докам IDE удаляет и тома; Stop/Restart безопасны).
+- [ ] Защитить том: объявить `mysql-data` внешним (`external: true`,
+  `name: invoice-pdfkit_mysql-data`) или перейти на bind mount
+  `./mysql-data:/var/lib/mysql` (каталог уже в `.gitignore`).
+- [ ] Проверить, что том не создаётся заново при смене имени проекта/каталога
+  (имя тома привязано к имени папки).
 
 ## Открытые вопросы
 

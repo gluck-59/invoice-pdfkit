@@ -8,7 +8,6 @@
 
   "bill_to": "Factuuradres",
   "ship_to": "Bezorgadres",
-  "attn": "tav.",
 
   "order_id": "Ordernummer",
   "order_ref": "Kenmerk",
@@ -159,5 +158,6 @@
   "cf_taxID": "Belastingnummer",
   "cf_termsURL": "Voorwaarden-URL",
   "cf_terms": "Voorwaarden (één per regel)",
-  "cf_tagline": "Slogan"
+  "cf_tagline": "Slogan",
+  "add_items_for_total": "Voeg artikelen toe om het totaal te berekenen"
 }

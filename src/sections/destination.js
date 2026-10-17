@@ -4,7 +4,7 @@ const Destination = (doc, addr, title, isSmall) => {
   if (!addr) return;
   const values = [
     addr.company,
-    addr.name ? t("attn") + " " + addr.name : "",
+    addr.name,
     addr.addr1,
     addr.addr2,
     addr.city,

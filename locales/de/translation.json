@@ -8,7 +8,6 @@
 
   "bill_to": "Rechnungsadresse",
   "ship_to": "Lieferungsadresse",
-  "attn": "z.Hd",
 
   "order_id": "Ordernummer",
   "order_ref": "Referenz",
@@ -159,5 +158,6 @@
   "cf_taxID": "Steuernummer",
   "cf_termsURL": "AGB-URL",
   "cf_terms": "Bedingungen (eine pro Zeile)",
-  "cf_tagline": "Slogan"
+  "cf_tagline": "Slogan",
+  "add_items_for_total": "Fügen Sie Artikel hinzu, um die Summe zu berechnen"
 }

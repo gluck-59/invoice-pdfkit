@@ -120,7 +120,13 @@ $lang = currentLang();
 $dbError = '';
 $errors = [];
 $mode = $_GET['mode'] ?? '';
-if ($mode !== 'register' && $mode !== 'login' && $mode !== 'cabinet' && $mode !== 'logo') {
+$reqPath = rtrim((string)parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/');
+if ($reqPath === '/preview') {
+    $mode = 'preview';
+}
+if ($mode !== 'register' && $mode !== 'login' && $mode !== 'cabinet'
+    && $mode !== 'logo' && $mode !== 'preview'
+) {
     $mode = '';
 }
 
@@ -406,6 +412,98 @@ try {
         exit;
     }
 
+    // PDF preview: the generator (node) has no DB access, so PHP assembles the
+    // current user's company data and forwards it to the render API. header/
+    // footer come from public/header.html + public/footer.html; body is pdfkit.
+    // No data entered yet -> empty fields are rendered.
+    if ($mode === 'preview') {
+        $uid = $_SESSION['user_id'] ?? null;
+        if (!$uid) {
+            header('Location: /?mode=login');
+            exit;
+        }
+        $company = [];
+        foreach (COMPANY_FIELDS as $f) {
+            $company[$f] = '';
+        }
+        $company['terms'] = [];
+        $logoB64 = null;
+        $cid = (int)($_GET['company'] ?? 0);
+        if ($cid > 0) {
+            $st = $mysqli->prepare('SELECT data, img FROM companies WHERE id = ? AND user_id = ?');
+            $st->bind_param('ii', $cid, $uid);
+        } else {
+            $st = $mysqli->prepare('SELECT data, img FROM companies WHERE user_id = ? ORDER BY id LIMIT 1');
+            $st->bind_param('i', $uid);
+        }
+        $st->execute();
+        $st->bind_result($cData, $cImg);
+        if ($st->fetch()) {
+            $row = json_decode((string)$cData, true) ?: [];
+            foreach (COMPANY_FIELDS as $f) {
+                if (array_key_exists($f, $row)) {
+                    $company[$f] = $row[$f];
+                }
+            }
+            if ($cImg) {
+                $p = UPLOADS_DIR . '/' . basename((string)$cImg);
+                if (is_file($p)) {
+                    $logoB64 = base64_encode((string)file_get_contents($p));
+                }
+            }
+        }
+        $st->close();
+
+        $settings = [
+            'company' => $company,
+            'language' => currentLang(),
+            'locale' => 'en-US',
+            'currency' => 'USD',
+            'page' => ['size' => 'A4'],
+        ];
+        if ($logoB64 !== null) {
+            $settings['logoBase64'] = $logoB64;
+        }
+        $payload = json_encode([
+            'settings' => $settings,
+            'order' => [
+                'id' => '', 'ref' => '', 'date' => [],
+                'bill' => [], 'ship' => [], 'total' => [], 'items' => [],
+            ],
+        ], JSON_UNESCAPED_UNICODE);
+
+        $headers = "Content-Type: application/json\r\n";
+        $token = envv('RENDER_TOKEN');
+        if ($token !== '') {
+            $headers .= 'X-Render-Token: ' . $token . "\r\n";
+        }
+        $ctx = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => $headers,
+            'content' => $payload,
+            'timeout' => 30,
+            'ignore_errors' => true,
+        ]]);
+        $pdf = @file_get_contents('http://node:3000/api/render/invoice', false, $ctx);
+        $status = 0;
+        if (isset($http_response_header[0])
+            && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)
+        ) {
+            $status = (int)$m[1];
+        }
+        if ($pdf === false || $status !== 200) {
+            http_response_code(502);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'PDF render failed';
+            exit;
+        }
+        header('Content-Type: application/pdf');
+        header('Content-Length: ' . strlen($pdf));
+        header('Content-Disposition: inline; filename="invoice.pdf"');
+        echo $pdf;
+        exit;
+    }
+
     // Cabinet data for the page below.
     $cabCompanies = [];
     $cabCompany = null;
@@ -505,7 +603,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 <section class="block" id="cabinet">
   <div class="wrap">
     <h2><?= e(t('cabinet')) ?></h2>
-    <p class="center-sub"><?= e($userEmail) ?></p>
+<!--    <p class="center-sub">--><?php //= e($userEmail) ?><!--</p>-->
     <?php if ($saved === 'email'): ?>
       <div class="ok"><?= e(t('saved_email')) ?></div>
     <?php elseif ($saved === 'password'): ?>
@@ -519,12 +617,12 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       <div class="err" style="max-width:720px;margin:0 auto 12px"><?= e($err) ?></div>
     <?php endforeach; ?>
 
-    <h3 class="cab-h"><?= e(t('my_companies')) ?></h3>
     <?php if ($cabCompanies): ?>
+    <h3 class="cab-h"><?= e(t('my_companies')) ?></h3>
     <table class="cab-table">
-      <tr><th><?= e(t('th_logo')) ?></th><th><?= e(t('th_company')) ?></th><th></th></tr>
       <?php foreach ($cabCompanies as $c): ?>
       <tr<?= $cabCompany && (int)$cabCompany['id'] === (int)$c['id'] ? ' class="sel"' : '' ?>>
+        <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e((string)($c['data']['company'] ?? ('#' . $c['id']))) ?></a></td>
         <td class="thumb">
           <?php if (!empty($c['img'])): ?>
             <img src="/?mode=logo&id=<?= (int)$c['id'] ?>" alt="logo">
@@ -532,14 +630,13 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
             <div class="noimg">NO IMAGE</div>
           <?php endif; ?>
         </td>
-        <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e((string)($c['data']['company'] ?? ('#' . $c['id']))) ?></a></td>
-        <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e(t('edit')) ?></a></td>
       </tr>
       <?php endforeach; ?>
     </table>
-    <?php endif; ?>
+    <?php endif;
+    ?>
 
-    <h3 class="cab-h"><?= e($cabCompany ? t('edit') . ' #' . (int)$cabCompany['id'] : t('new_company')) ?>
+    <h3 class="cab-h"><?= e($cabCompany ? t('edit') . ' ' . $cabCompany['data']['company'] : t('new_company')) ?>
       <small class="muted"><?= t('non_required')?></small>
     </h3>
     <form method="post" action="/?mode=cabinet<?= $cabCompany ? '&company=' . (int)$cabCompany['id'] : '' ?>" class="cab-form">

@@ -1,22 +1,13 @@
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
-const { t, config, setDocHelper, docH, dt } = require("./globals");
+const { t, showDate, config, setDocHelper, docH, dt } = require("./globals");
 
-const Title = require("./sections/title");
-const Logo = require("./sections/logo");
-const Company = require("./sections/company");
-const Order = require("./sections/order");
-const Destination = require("./sections/destination");
+const htmlZone = require("./htmlZone");
 const { calcItems, Prices } = require("./sections/items");
 const { calcTotals, Totals } = require("./sections/totals");
 const Note = require("./sections/note");
 const { PayQR, PayDetails, getDetails } = require("./sections/payment");
-const {
-  Terms,
-  getPageIndicatorHeight,
-  PageNumbers,
-} = require("./sections/terms");
 
 const localesPath = __dirname + "/../locales";
 const defaultFont = path.join(__dirname, "../fonts/OpenSans-Regular.ttf");
@@ -73,44 +64,43 @@ const generate = (docType, order, payment) =>
   });
   setDocHelper(doc);
   doc.font(config.fontName);
-  doc.page.margins.bottom += getPageIndicatorHeight(doc);
   //
-  // Section
-  Title(doc);
-  Logo(doc);
-  // Increased top margin for following pages (visually appealing)
-  doc.page.margins.top *= 2;
-  //doc.page.margins.top = doc.y / 2;
+  // Section: header — rendered from public/header.html (prototype) with
+  // this client's cabinet data; the file is the layout source.
+  htmlZone.renderHeader(doc, {
+    company: config.company || {},
+    bill: (order && order.bill) || {},
+    ship: (order && order.ship) || {},
+    order: {
+      id: order.id,
+      ref: order.ref,
+      clientID: order.clientID,
+      salesRep: order.salesRep,
+      date: {
+        created: showDate(order.date && order.date.created),
+        due: showDate(order.date && order.date.due),
+      },
+    },
+  });
   //
-  // Section
-  const companyPos = Company(doc);
-  docH.jumpStart(companyPos);
-  let billPos, shipPos;
-  if (config.docType === dt.PACKING) {
-    shipPos = Destination(doc, order.ship, t("ship_to"), false);
-    billPos = Destination(doc, order.bill, t("bill_to"), true);
-  } else if (config.docType === dt.RETURN) {
-    const { company } = config;
-    if (company.ship) {
-      shipPos = Destination(doc, company.ship, t("ship_to"), false);
-      billPos = Destination(doc, company, t("bill_to"), true);
-    } else {
-      shipPos = Destination(doc, company, t("ship_to"), false);
-    }
-  } else if ([dt.QUOTE, dt.REFUND].includes(config.docType)) {
-    billPos = Destination(doc, order.bill, t("bill_to"), false);
-  } else {
-    billPos = Destination(doc, order.bill, t("bill_to"), false);
-    shipPos = Destination(doc, order.ship, t("ship_to"), true);
-  }
-  const orderPos = Order(doc, order);
-  docH.jumpBelow(companyPos, billPos, shipPos, orderPos);
-  //
-  // Section
+  // Section: body (pdfkit — items table + sums)
   const itemsData = calcItems(order);
-  const totalsData = calcTotals(doc, order, itemsData);
-  Prices(doc, order, itemsData, totalsData);
-  const totalsPos = Totals(doc, order, totalsData);
+  let totalsPos;
+  if (order.items?.length) {
+    const totalsData = calcTotals(doc, order, itemsData);
+    Prices(doc, order, itemsData, totalsData);
+    totalsPos = Totals(doc, order, totalsData);
+  } else {
+    doc.font(config.fontNameBold);
+    doc.fontSize(config.fontSize);
+    doc.text(t("add_items_for_total"), doc.page.margins.left, doc.y, {
+      width: docH.printWidth,
+      align: "center",
+    });
+    doc.font(config.fontName);
+    doc.moveDown(1);
+    totalsPos = docH.returnPos({ width: 0 });
+  }
   const roomTotals = docH.printWidth - totalsPos.width;
   if (roomTotals > docH.printWidth / 2) {
     docH.jumpStart(totalsPos);
@@ -130,13 +120,14 @@ const generate = (docType, order, payment) =>
   const payDetailsPos = PayDetails(doc, details);
   docH.jumpBelow(totalsPos, payQRpos, payDetailsPos);
   //
-  // Section
-  Terms(doc, order);
-  //
-  // Section
-  doc.page.margins.bottom -= getPageIndicatorHeight(doc);
-  PageNumbers(doc);
-  doc.page.margins.top /= 2;
+  // Section: footer — rendered from public/footer.html (prototype); starts
+  // right where the body ended.
+  const pages = String(doc._pageBuffer.length);
+  htmlZone.renderFooter(doc, {
+    company: config.company || {},
+    page: pages,
+    pages,
+  });
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
   doc.on("end", () => resolve(Buffer.concat(chunks)));

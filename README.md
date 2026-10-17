@@ -12,6 +12,7 @@
 - [About](#about)
 - [Example](#example)
 - [Features](#features)
+- [Local development (Docker)](#local-development-docker)
 - [Donation](#donation)
 - [Translation](#translation)
 - [Notes](#notes)
@@ -97,6 +98,46 @@ If you clone this repo, `npm run tsstart` will regenerate the example files.
 - QR-code support for both legacy bank transfers and crypto payments, especially useful for the long address payload of bitcoin lightning network invoices.
 - Short-form human readable crypto addresses such as Ethereum's ENS can be specified in either the _company_ or _payment_ object at the same location as the bank account number or IBAN/SEPA number.
 - A list of all supported fields can be found in [types/main.d.ts](types/main.d.ts). TypeScript support is optional. Most of the fields are demonstrated by the example files.
+
+## Local development (Docker)
+
+This repository also ships a local Docker stack for the Inquistador cabinet:
+
+- `nginx` on `:80` — `^/(api|health)` and `^/(template|locales|fonts)` go to node,
+  everything else to PHP.
+- `php` — cabinet UI + database access ([php-app/](php-app/)). `POST`/`GET /preview/`
+  renders the current user's PDF by forwarding the cabinet data to node.
+- `node` — [server.js](server.js) renders PDF only (`POST /api/render/invoice`),
+  no database access, no storage of client data.
+- `mysql` — the client data.
+
+Start the stack with `docker compose up -d --build`. `src/` and `server.js` are
+baked into the node image, so after editing them rebuild the service
+(`docker compose up -d --build node`); `public/` is bind-mounted and applies
+without a rebuild.
+
+### MySQL data persistence
+
+Client data lives in the named Docker volume `invoice-pdfkit_mysql-data`
+(declared as `mysql-data` in `docker-compose.yml`). Named volumes survive both
+`docker compose up --build` and `docker compose down`, so a rebuild never wipes
+the database. Data is lost only when a volume is explicitly removed:
+
+- `docker compose down -v` / `docker compose down --volumes`;
+- `docker volume prune` / `docker system prune --volumes`;
+- the **Down** action in PhpStorm (Services → Compose node → Down), which is
+  documented to remove volumes too. Prefer **Stop**/**Restart**, and use the
+  **Run** button (Shift+F10) to start/recreate containers.
+
+To make the database volume indestructible, declare it external — Compose never
+removes external volumes, even with `-v`:
+
+```yaml
+volumes:
+  mysql-data:
+    external: true
+    name: invoice-pdfkit_mysql-data
+```
 
 ## Donation
 

@@ -42,7 +42,7 @@
     max-width: 180px;
     max-height: 120px;
   }
-  .cols { display: flex; gap: 16px; }
+  .cols { display: flex; gap: 16px; margin-top: 30px; }
   .col { flex: 1; }
   .right { text-align: right; }
   .small { font-size: 9.9pt; }
@@ -75,7 +75,7 @@
     <div class="col">
       <div class="block-title" data-i18n="bill_to">Bill To</div>
       <div>{{bill.company}}</div>
-      <div><span data-i18n="attn">attn.</span> {{bill.name}}</div>
+      <div>{{bill.name}}</div>
       <div>{{bill.addr1}}</div>
       <div>{{bill.addr2}}</div>
       <div>{{bill.city}} {{bill.zip}}</div>
@@ -98,11 +98,11 @@
     </div>
   </div>
 
-  <div class="cols" style="margin-top:12px">
+  <div class="cols">
     <div class="col">
       <div class="block-title" data-i18n="ship_to">Ship To</div>
       <div>{{ship.company}}</div>
-      <div><span data-i18n="attn">attn.</span> {{ship.name}}</div>
+      <div>{{ship.name}}</div>
       <div>{{ship.addr1}}</div>
       <div>{{ship.city}} {{ship.zip}}</div>
       <div>{{ship.country}}</div>
