@@ -25,7 +25,7 @@ const STATIC_ROOT = { preview: "public", template: "public", locales: "locales",
 // Demo data for /preview/ (same values as test/run.js).
 const DEMO = {
   company: {
-    company: "My Company",
+    company: "Inquistador",
     addr1: "18th St.",
     city: "Fort Meade",
     zip: "FL 33941",
@@ -39,8 +39,8 @@ const DEMO = {
     registration: "K.v.K. 0441.956.713",
     taxID: "BTW nr. BE0423798694",
     termsURL: "https://shopping-example.com/terms",
-    terms: ["- Only valid if paid on time", "- Pay on time for real please"],
-    tagline: "Quality machinery for life - Thank you for doing business.",
+    // terms: ["- Only valid if paid on time", "- Pay on time for real please"],
+    // tagline: "Quality machinery for life - Thank you for doing business.",
   },
   bill: {
     company: "Super Grip Tires BV",
@@ -80,7 +80,7 @@ function demoVal(path) {
     if (v == null || typeof v !== "object" || !(k in v)) return "";
     v = v[k];
   }
-  if (Array.isArray(v)) return v.join(" ");
+  // if (Array.isArray(v)) return v.join(" ");
   return v == null ? "" : String(v);
 }
 

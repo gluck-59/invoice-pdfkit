@@ -8,6 +8,11 @@ session_start();
 
 const LOCALES_DIR = '/var/www/locales';
 const LANG_COOKIE = 'pdf-lang';
+const UPLOADS_DIR = '/var/www/uploads';
+const LOGO_MAX_BYTES = 2097152; // 2 MB
+const LOGO_EXTS = ['jpg', 'png', 'gif', 'svg'];
+// Company field set mirrors DEMO.company in server.js.
+const COMPANY_FIELDS = ['company', 'addr1', 'city', 'zip', 'state', 'country', 'tel', 'web', 'email', 'account', 'bankID', 'registration', 'taxID', 'termsURL', 'terms', 'tagline'];
 
 function envv(string $name, string $default = ''): string
 {
@@ -18,6 +23,17 @@ function envv(string $name, string $default = ''): string
 function e(string $s): string
 {
     return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+}
+
+function ownCompany(mysqli $db, int $cid, int $uid): bool
+{
+    $st = $db->prepare('SELECT id FROM companies WHERE id = ? AND user_id = ?');
+    $st->bind_param('ii', $cid, $uid);
+    $st->execute();
+    $st->store_result();
+    $ok = $st->num_rows > 0;
+    $st->close();
+    return $ok;
 }
 
 function availableLangs(): array
@@ -104,12 +120,12 @@ $lang = currentLang();
 $dbError = '';
 $errors = [];
 $mode = $_GET['mode'] ?? '';
-if ($mode !== 'register' && $mode !== 'login') {
+if ($mode !== 'register' && $mode !== 'login' && $mode !== 'cabinet' && $mode !== 'logo') {
     $mode = '';
 }
 
 try {
-    $mysqli = new mysqli(
+    $mysqli = @new mysqli(
         envv('MYSQL_HOST', 'mysql'),
         envv('MYSQL_USER', 'invoices'),
         envv('MYSQL_PASSWORD', 'invoices'),
@@ -127,6 +143,17 @@ try {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
+    $mysqli->query(
+        "CREATE TABLE IF NOT EXISTS companies (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            data JSON NOT NULL,
+            img VARCHAR(255) NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_companies_user FOREIGN KEY (user_id)
+                REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    );
 
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $action = $_POST['action'] ?? '';
@@ -138,12 +165,13 @@ try {
         }
         $email = trim((string)($_POST['email'] ?? ''));
         $password = (string)($_POST['password'] ?? '');
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $needsCredentials = ($action === 'register' || $action === 'login');
+        if ($needsCredentials && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors[] = t('err_invalid_email');
         }
-        if (strlen($password) < 8) {
-            $errors[] = t('err_password_short');
-        }
+//        if (strlen($password) < 8) {
+//            $errors[] = t('err_password_short');
+//        }
         if ($action === 'register') {
             $mode = 'register';
             $confirm = (string)($_POST['confirm'] ?? '');
@@ -169,7 +197,7 @@ try {
                 $st->close();
                 $_SESSION['user_id'] = $id;
                 $_SESSION['user_email'] = $email;
-                header('Location: /');
+                header('Location: /?mode=cabinet');
                 exit;
             }
         } elseif ($action === 'login') {
@@ -183,11 +211,220 @@ try {
                     $_SESSION['user_id'] = $id;
                     $_SESSION['user_email'] = $email;
                     $st->close();
-                    header('Location: /');
+                    header('Location: /?mode=cabinet');
                     exit;
                 }
                 $st->close();
                 $errors[] = t('err_invalid_credentials');
+            }
+        } elseif ($action === 'update_email') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = t('err_invalid_email');
+            }
+            if (!$errors) {
+                $st = $mysqli->prepare('SELECT id FROM users WHERE email = ? AND id <> ?');
+                $st->bind_param('si', $email, $uid);
+                $st->execute();
+                $st->store_result();
+                if ($st->num_rows > 0) {
+                    $errors[] = t('err_email_exists');
+                }
+                $st->close();
+            }
+            if (!$errors) {
+                $st = $mysqli->prepare('UPDATE users SET email = ? WHERE id = ?');
+                $st->bind_param('si', $email, $uid);
+                $st->execute();
+                $st->close();
+                $_SESSION['user_email'] = $email;
+                header('Location: /?mode=cabinet&saved=email');
+                exit;
+            }
+        } elseif ($action === 'update_password') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            $cur = (string)($_POST['current'] ?? '');
+            $new = (string)($_POST['new'] ?? '');
+            $confirm = (string)($_POST['confirm'] ?? '');
+            $st = $mysqli->prepare('SELECT password_hash FROM users WHERE id = ?');
+            $st->bind_param('i', $uid);
+            $st->execute();
+            $st->bind_result($hash);
+            $ok = $st->fetch() && password_verify($cur, $hash);
+            $st->close();
+            if (!$ok) {
+                $errors[] = t('err_invalid_credentials');
+            } elseif ($new !== $confirm) {
+                $errors[] = t('err_password_mismatch');
+            } else {
+                $nh = password_hash($new, PASSWORD_DEFAULT);
+                $st = $mysqli->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+                $st->bind_param('si', $nh, $uid);
+                $st->execute();
+                $st->close();
+                header('Location: /?mode=cabinet&saved=password');
+                exit;
+            }
+        } elseif ($action === 'save_company') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            $cid = (int)($_POST['company_id'] ?? 0);
+            if ($cid > 0 && !ownCompany($mysqli, $cid, $uid)) {
+                $errors[] = t('err_no_company');
+            } else {
+                $data = [];
+                foreach (COMPANY_FIELDS as $f) {
+                    if ($f === 'terms') {
+                        $lines = preg_split('/\r\n|\r|\n/', (string)($_POST['cf_terms'] ?? ''));
+                        $data[$f] = array_values(array_filter(
+                            array_map('trim', $lines ?: []),
+                            fn($s) => $s !== ''
+                        ));
+                    } else {
+                        $data[$f] = trim((string)($_POST['cf_' . $f] ?? ''));
+                    }
+                }
+                $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+                if ($cid > 0) {
+                    $st = $mysqli->prepare('UPDATE companies SET data = ? WHERE id = ? AND user_id = ?');
+                    $st->bind_param('sii', $json, $cid, $uid);
+                } else {
+                    $st = $mysqli->prepare('INSERT INTO companies (user_id, data) VALUES (?, ?)');
+                    $st->bind_param('is', $uid, $json);
+                }
+                $st->execute();
+                if ($cid === 0) {
+                    $cid = $st->insert_id;
+                }
+                $st->close();
+                header('Location: /?mode=cabinet&company=' . $cid . '&saved=company');
+                exit;
+            }
+        } elseif ($action === 'upload_logo') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            $cid = (int)($_POST['company_id'] ?? 0);
+            if ($cid <= 0 || !ownCompany($mysqli, $cid, $uid)) {
+                $errors[] = t('err_no_company');
+            } elseif (!isset($_FILES['logo']) || $_FILES['logo']['error'] !== UPLOAD_ERR_OK) {
+                $errors[] = t('err_upload');
+            } else {
+                $f = $_FILES['logo'];
+                if ($f['size'] > LOGO_MAX_BYTES) {
+                    $errors[] = t('err_file_size');
+                } else {
+                    $ext = strtolower(pathinfo((string)$f['name'], PATHINFO_EXTENSION));
+                    if ($ext === 'jpeg') {
+                        $ext = 'jpg';
+                    }
+                    $valid = false;
+                    if (in_array($ext, LOGO_EXTS, true)) {
+                        if ($ext === 'svg') {
+                            $head = @file_get_contents($f['tmp_name'], false, null, 0, 65536);
+                            $valid = $head !== false
+                                && stripos($head, '<svg') !== false
+                                && stripos($head, '<script') === false;
+                        } else {
+                            $valid = @getimagesize($f['tmp_name']) !== false;
+                        }
+                    }
+                    if (!$valid) {
+                        $errors[] = t('err_file_type');
+                    } else {
+                        $name = bin2hex(random_bytes(16)) . '.' . $ext;
+                        @mkdir(UPLOADS_DIR, 0777, true);
+                        if (!move_uploaded_file($f['tmp_name'], UPLOADS_DIR . '/' . $name)) {
+                            $errors[] = t('err_upload');
+                        } else {
+                            $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+                            $st->bind_param('ii', $cid, $uid);
+                            $st->execute();
+                            $st->bind_result($old);
+                            if ($st->fetch() && $old) {
+                                @unlink(UPLOADS_DIR . '/' . basename((string)$old));
+                            }
+                            $st->close();
+                            $st = $mysqli->prepare('UPDATE companies SET img = ? WHERE id = ? AND user_id = ?');
+                            $st->bind_param('sii', $name, $cid, $uid);
+                            $st->execute();
+                            $st->close();
+                            header('Location: /?mode=cabinet&company=' . $cid . '&saved=logo');
+                            exit;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Logo bytes: owner-checked, served by PHP (nginx has no uploads mount).
+    if ($mode === 'logo' && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        $uid = $_SESSION['user_id'] ?? null;
+        $lid = (int)($_GET['id'] ?? 0);
+        $path = null;
+        if ($uid && $lid > 0) {
+            $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+            $st->bind_param('ii', $lid, $uid);
+            $st->execute();
+            $st->bind_result($img);
+            if ($st->fetch() && $img) {
+                $p = UPLOADS_DIR . '/' . basename((string)$img);
+                if (is_file($p)) {
+                    $path = $p;
+                }
+            }
+            $st->close();
+        }
+        if ($path === null) {
+            http_response_code(404);
+            exit;
+        }
+        $mime = [
+            'jpg' => 'image/jpeg', 'png' => 'image/png',
+            'gif' => 'image/gif', 'svg' => 'image/svg+xml',
+        ][strtolower(pathinfo($path, PATHINFO_EXTENSION))] ?? 'application/octet-stream';
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . filesize($path));
+        readfile($path);
+        exit;
+    }
+
+    // Cabinet data for the page below.
+    $cabCompanies = [];
+    $cabCompany = null;
+    $cabUid = $_SESSION['user_id'] ?? null;
+    if ($cabUid) {
+        $st = $mysqli->prepare('SELECT id, data, img FROM companies WHERE user_id = ? ORDER BY id');
+        $st->bind_param('i', $cabUid);
+        $st->execute();
+        $res = $st->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $row['data'] = json_decode((string)$row['data'], true) ?: [];
+            $cabCompanies[] = $row;
+        }
+        $st->close();
+        $sel = (int)($_GET['company'] ?? $_POST['company_id'] ?? 0);
+        foreach ($cabCompanies as $c) {
+            if ((int)$c['id'] === $sel) {
+                $cabCompany = $c;
+                break;
             }
         }
     }
@@ -197,224 +434,49 @@ try {
 }
 
 $userEmail = $_SESSION['user_email'] ?? null;
-// Вошедшему пользователю формы не нужны — только лендинг.
-if ($userEmail && $mode !== '' && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+if (!$userEmail && $mode === 'cabinet') {
+    $mode = 'login';
+} elseif ($userEmail && ($mode === 'register' || $mode === 'login')
+    && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST'
+) {
     $mode = '';
 }
-$title = $mode === 'register' ? t('register') : ($mode === 'login' ? t('login') : t('app_title'));
+$isCabinet = ($mode === 'cabinet' && (bool)$userEmail);
+$saved = $_GET['saved'] ?? '';
+$title = $mode === 'register' ? t('register') : ($mode === 'login' ? t('login') : ($mode === 'cabinet' ? t('cabinet') : t('app_title')));
 $langCount = (string)count(availableLangs());
+$favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='12' fill='%23C9A13B'/%3E%3Ctext x='32' y='44' font-family='Georgia, serif' font-weight='bold' font-size='34' fill='%239E252B' text-anchor='middle'%3EIn%3C/text%3E%3C/svg%3E";
 ?>
 <!doctype html>
 <html lang="<?= e($lang) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="<?= $favicon ?>">
 <title><?= e($title) ?></title>
-<style>
-  * { box-sizing: border-box; }
-  :root {
-    --bg: #0b1220;
-    --bg2: #0f1b2d;
-    --card: #111d33;
-    --line: rgba(148,163,184,.16);
-    --txt: #e8eef7;
-    --mut: #93a3bb;
-    --acc: #2dd4bf;
-    --acc-d: #0d9488;
-  }
-  body {
-    margin: 0;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: var(--bg);
-    color: var(--txt);
-  }
-  a { color: inherit; }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-  /* nav */
-  .nav {
-    position: sticky; top: 0; z-index: 10;
-    background: rgba(11,18,32,.85);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
-  }
-  .nav-in { display: flex; align-items: center; gap: 28px; height: 64px; }
-  .brand { font-weight: 800; font-size: 19px; text-decoration: none; }
-  .brand span { color: var(--acc); }
-  .nav-links { display: flex; gap: 22px; margin-left: 12px; }
-  .nav-links a { color: var(--mut); text-decoration: none; font-size: 15px; }
-  .nav-links a:hover { color: var(--txt); }
-  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-  .nav-mail { color: var(--mut); font-size: 14px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .btn {
-    display: inline-block;
-    padding: 11px 22px;
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: 600;
-    text-decoration: none;
-    cursor: pointer;
-    border: 0;
-  }
-  .btn.primary { background: var(--acc); color: #04211d; }
-  .btn.primary:hover { background: #5eead4; }
-  .btn.ghost { background: transparent; color: var(--txt); border: 1px solid var(--line); }
-  .btn.ghost:hover { border-color: var(--acc); }
-  .btn.small { padding: 8px 16px; font-size: 14px; }
-  .langsel {
-    background: transparent;
-    color: var(--txt);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 8px 10px;
-    font-size: 14px;
-    cursor: pointer;
-  }
-  .langsel option { color: #0f172a; }
-  /* hero */
-  .hero {
-    position: relative;
-    overflow: hidden;
-    padding: 88px 0 64px;
-    background:
-      radial-gradient(700px 340px at 15% 0%, rgba(45,212,191,.16), transparent 60%),
-      radial-gradient(600px 300px at 90% 20%, rgba(59,130,246,.14), transparent 60%);
-  }
-  .hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
-  .badge {
-    display: inline-block;
-    font-size: 13px;
-    color: var(--acc);
-    border: 1px solid rgba(45,212,191,.4);
-    border-radius: 999px;
-    padding: 6px 14px;
-    margin-bottom: 20px;
-  }
-  h1 {
-    margin: 0 0 18px;
-    font-size: 52px;
-    line-height: 1.05;
-    letter-spacing: -1px;
-  }
-  .sub { color: var(--mut); font-size: 18px; line-height: 1.6; margin: 0 0 30px; }
-  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
-  .stats { display: flex; gap: 36px; margin-top: 40px; }
-  .stat b { display: block; font-size: 26px; }
-  .stat span { color: var(--mut); font-size: 14px; }
-  /* product mock */
-  .mock {
-    background: #fff;
-    color: #0f172a;
-    border-radius: 14px;
-    padding: 26px 28px;
-    box-shadow: 0 30px 80px rgba(0,0,0,.5);
-    transform: rotate(1.5deg);
-  }
-  .mock h3 { margin: 0 0 4px; font-size: 26px; font-weight: 400; }
-  .mock .row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; border-bottom: 1px solid #eef2f7; }
-  .mock .row span:first-child { color: #64748b; }
-  .mock .total { display: flex; justify-content: space-between; font-weight: 800; font-size: 15px; padding-top: 10px; }
-  /* sections */
-  section.block { padding: 72px 0; }
-  h2 { font-size: 34px; letter-spacing: -.5px; margin: 0 0 10px; text-align: center; }
-  p.center-sub { color: var(--mut); text-align: center; margin: 0 0 40px; font-size: 17px; }
-  .bento { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .tile {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 28px;
-  }
-  .tile.wide { grid-column: 1 / -1; }
-  .tile h3 { margin: 0 0 10px; font-size: 19px; }
-  .tile p { margin: 0; color: var(--mut); font-size: 15px; line-height: 1.6; }
-  .tile .ico { font-size: 26px; }
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  .step {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 28px;
-  }
-  .step .n {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 36px; height: 36px; border-radius: 50%;
-    background: var(--acc); color: #04211d; font-weight: 800; margin-bottom: 14px;
-  }
-  .step h3 { margin: 0 0 8px; font-size: 18px; }
-  .step p { margin: 0; color: var(--mut); font-size: 15px; line-height: 1.6; }
-  /* auth */
-  .auth-card {
-    max-width: 440px; margin: 0 auto;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 36px 38px;
-    text-align: center;
-  }
-  .auth-card h2 { margin-bottom: 6px; }
-  .tabs { display: flex; gap: 8px; margin: 20px 0; }
-  .tabs a {
-    flex: 1; padding: 10px; border-radius: 10px; text-decoration: none;
-    background: var(--bg2); color: var(--mut); font-weight: 600; font-size: 15px;
-  }
-  .tabs a.on { background: var(--acc); color: #04211d; }
-  input {
-    display: block; width: 100%;
-    padding: 12px; margin: 8px 0;
-    border: 1px solid var(--line); border-radius: 10px;
-    font-size: 15px; background: var(--bg2); color: var(--txt);
-  }
-  input::placeholder { color: var(--mut); }
-  .auth-card .btn { width: 100%; margin-top: 8px; }
-  .err {
-    background: rgba(248,113,113,.12);
-    color: #fca5a5;
-    border: 1px solid rgba(248,113,113,.35);
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin: 0 0 12px;
-    font-size: 14px;
-    text-align: left;
-  }
-  .back { display: inline-block; margin-top: 16px; color: var(--mut); font-size: 14px; }
-  /* cta + footer */
-  .cta-band {
-    background: linear-gradient(135deg, #0d9488, #155e75);
-    border-radius: 18px;
-    padding: 56px 40px;
-    text-align: center;
-  }
-  .cta-band h2 { color: #fff; }
-  .cta-band p { color: rgba(255,255,255,.8); margin: 0 0 26px; font-size: 17px; }
-  .cta-band .btn.primary { background: #fff; color: #0b3b36; }
-  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--mut); font-size: 14px; }
-  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  footer a { color: var(--mut); }
-  @media (max-width: 860px) {
-    .hero-grid { grid-template-columns: 1fr; }
-    h1 { font-size: 38px; }
-    .bento, .steps { grid-template-columns: 1fr; }
-    .nav-links { display: none; }
-    .mock { transform: none; }
-  }
-</style>
+<link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
 
 <?php if ($dbError): ?>
 <div class="wrap" style="padding:60px 24px;text-align:center">
   <h1><?= e(t('err_db')) ?></h1>
-  <p class="sub"><?= e($dbError) ?></p>
+  <p class="sub"><?= e(t('err_db_hint')) ?></p>
 </div>
 <?php else: ?>
 
 <header class="nav">
   <div class="wrap nav-in">
-    <a class="brand" href="/"><span>▦</span> Invoice</a>
+    <a class="brand" href="/"><span><img class="foot-ico" src="<?= $favicon ?>" alt=""></span> Inquistador</a>
     <nav class="nav-links">
-      <a href="#features"><?= e(t('nav_features')) ?></a>
-      <a href="#how"><?= e(t('nav_how')) ?></a>
-      <a href="/preview/"><?= e(t('nav_templates')) ?></a>
+      <?php if ($isCabinet): ?>
+        <a href="/preview/" target="_blank"><?= e(t('preview')) ?></a>
+        <a href="/?mode=cabinet#cabinet"><?= e(t('my_companies')) ?></a>
+      <?php else: ?>
+        <a href="#features"><?= e(t('nav_features')) ?></a>
+        <a href="#how"><?= e(t('nav_how')) ?></a>
+        <a href="/preview/"><?= e(t('nav_templates')) ?></a>
+      <?php endif; ?>
     </nav>
     <div class="nav-right">
       <select class="langsel" onchange="location.href='?lang='+this.value+'<?= $mode ? '&mode=' . e($mode) : '' ?>'">
@@ -424,18 +486,112 @@ $langCount = (string)count(availableLangs());
       </select>
       <?php if ($userEmail): ?>
         <span class="nav-mail"><?= e($userEmail) ?></span>
+        <?php if (!$isCabinet): ?>
+          <a class="btn ghost small" href="/?mode=cabinet"><?= e(t('cabinet')) ?></a>
+        <?php endif; ?>
         <form method="post" action="/" style="margin:0">
           <input type="hidden" name="action" value="logout">
           <button class="btn ghost small" type="submit"><?= e(t('logout')) ?></button>
         </form>
       <?php else: ?>
-        <a class="btn ghost small" href="#start"><?= e(t('nav_login')) ?></a>
+        <a class="btn ghost small" href="/?mode=login#start"><?= e(t('nav_login')) ?></a>
         <a class="btn primary small" href="#start"><?= e(t('hero_primary')) ?></a>
       <?php endif; ?>
     </div>
   </div>
 </header>
 
+<?php if ($isCabinet): ?>
+<section class="block" id="cabinet">
+  <div class="wrap">
+    <h2><?= e(t('cabinet')) ?></h2>
+    <p class="center-sub"><?= e($userEmail) ?></p>
+    <?php if ($saved === 'email'): ?>
+      <div class="ok"><?= e(t('saved_email')) ?></div>
+    <?php elseif ($saved === 'password'): ?>
+      <div class="ok"><?= e(t('saved_password')) ?></div>
+    <?php elseif ($saved === 'company'): ?>
+      <div class="ok"><?= e(t('saved_company')) ?></div>
+    <?php elseif ($saved === 'logo'): ?>
+      <div class="ok"><?= e(t('saved_logo')) ?></div>
+    <?php endif; ?>
+    <?php foreach ($errors as $err): ?>
+      <div class="err" style="max-width:720px;margin:0 auto 12px"><?= e($err) ?></div>
+    <?php endforeach; ?>
+
+    <h3 class="cab-h"><?= e(t('my_companies')) ?></h3>
+    <?php if ($cabCompanies): ?>
+    <table class="cab-table">
+      <tr><th><?= e(t('th_logo')) ?></th><th><?= e(t('th_company')) ?></th><th></th></tr>
+      <?php foreach ($cabCompanies as $c): ?>
+      <tr<?= $cabCompany && (int)$cabCompany['id'] === (int)$c['id'] ? ' class="sel"' : '' ?>>
+        <td class="thumb">
+          <?php if (!empty($c['img'])): ?>
+            <img src="/?mode=logo&id=<?= (int)$c['id'] ?>" alt="logo">
+          <?php else: ?>
+            <div class="noimg">NO IMAGE</div>
+          <?php endif; ?>
+        </td>
+        <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e((string)($c['data']['company'] ?? ('#' . $c['id']))) ?></a></td>
+        <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e(t('edit')) ?></a></td>
+      </tr>
+      <?php endforeach; ?>
+    </table>
+    <?php endif; ?>
+
+    <h3 class="cab-h"><?= e($cabCompany ? t('edit') . ' #' . (int)$cabCompany['id'] : t('new_company')) ?>
+      <small class="muted"><?= t('non_required')?></small>
+    </h3>
+    <form method="post" action="/?mode=cabinet<?= $cabCompany ? '&company=' . (int)$cabCompany['id'] : '' ?>" class="cab-form">
+      <input type="hidden" name="action" value="save_company">
+      <input type="hidden" name="company_id" value="<?= $cabCompany ? (int)$cabCompany['id'] : '' ?>">
+      <?php foreach (COMPANY_FIELDS as $f): ?>
+        <?php if ($f === 'terms'): ?>
+          <label><?= e(t('cf_terms')) ?><textarea name="cf_terms" rows="3"><?= e(implode("\n", (array)($cabCompany['data']['terms'] ?? []))) ?></textarea></label>
+        <?php else: ?>
+          <label><?= e(t('cf_' . $f)) ?><input name="cf_<?= e($f) ?>" value="<?= e((string)($cabCompany['data'][$f] ?? '')) ?>"></label>
+        <?php endif; ?>
+      <?php endforeach; ?>
+      <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
+    </form>
+
+    <?php if ($cabCompany): ?>
+    <h3 class="cab-h"><?= e(t('cab_logo')) ?></h3>
+    <form method="post" action="/?mode=cabinet&company=<?= (int)$cabCompany['id'] ?>" enctype="multipart/form-data">
+      <input type="hidden" name="action" value="upload_logo">
+      <input type="hidden" name="company_id" value="<?= (int)$cabCompany['id'] ?>">
+      <div class="drop" id="drop">
+        <span><?= e(t('logo_drop')) ?></span>
+        <small><?= e(t('logo_hint')) ?></small>
+        <input type="file" name="logo" id="logo-file" accept=".jpg,.jpeg,.png,.gif,.svg" hidden>
+      </div>
+      <button class="btn primary" type="submit" style="margin-top:12px"><?= e(t('save')) ?></button>
+    </form>
+    <script src="/js/app.js" defer></script>
+    <?php endif; ?>
+
+    <hr>
+
+    <h3 class="cab-h"><?= e(t('your_data')) ?></h3>
+    <form method="post" action="/?mode=cabinet" class="cab-form">
+      <input type="hidden" name="action" value="update_email">
+      <label><?= e(t('email')) ?><input type="email" name="email" required value="<?= e($userEmail) ?>"></label>
+      <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
+    </form>
+
+    <h3 class="cab-h"><?= e(t('cab_password')) ?></h3>
+    <form method="post" action="/?mode=cabinet" class="cab-form">
+      <input type="hidden" name="action" value="update_password">
+      <label><?= e(t('cur_password')) ?><input type="password" name="current" required autocomplete="current-password"></label>
+      <label><?= e(t('new_password')) ?><input type="password" name="new" required autocomplete="new-password"></label>
+      <label><?= e(t('confirm_password')) ?><input type="password" name="confirm" required autocomplete="new-password"></label>
+      <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
+    </form>
+  </div>
+</section>
+<?php endif; ?>
+
+<?php if (!$isCabinet): ?>
 <div class="hero">
   <div class="wrap hero-grid">
     <div>
@@ -447,7 +603,7 @@ $langCount = (string)count(availableLangs());
           <a class="btn primary" href="/preview/"><?= e(t('nav_templates')) ?></a>
         <?php else: ?>
           <a class="btn primary" href="#start"><?= e(t('hero_primary')) ?></a>
-          <a class="btn ghost" href="#start-login"><?= e(t('hero_secondary')) ?></a>
+          <a class="btn ghost" href="/?mode=login#start"><?= e(t('hero_secondary')) ?></a>
         <?php endif; ?>
       </div>
       <div class="stats">
@@ -492,21 +648,11 @@ $langCount = (string)count(availableLangs());
   </div>
 </section>
 
+<?php if (!$userEmail): ?>
 <section class="block" id="start" style="padding-top:0">
   <div class="wrap">
     <div class="auth-card" id="start-login">
-      <?php if ($userEmail): ?>
-        <h2><?= e(t('welcome')) ?></h2>
-        <p class="center-sub"><?= e($userEmail) ?></p>
-        <?php foreach ($errors as $err): ?>
-          <div class="err"><?= e($err) ?></div>
-        <?php endforeach; ?>
-        <form method="post" action="/">
-          <input type="hidden" name="action" value="logout">
-          <button class="btn ghost" type="submit"><?= e(t('logout')) ?></button>
-        </form>
-      <?php else: ?>
-        <?php $isReg = $mode !== 'login'; ?>
+      <?php $isReg = $mode !== 'login'; ?>
         <h2><?= e($isReg ? t('register') : t('login')) ?></h2>
         <div class="tabs">
           <a href="/?mode=register#start" class="<?= $isReg ? 'on' : '' ?>"><?= e(t('register')) ?></a>
@@ -525,10 +671,10 @@ $langCount = (string)count(availableLangs());
           <?php endif; ?>
           <button class="btn primary" type="submit"><?= e($isReg ? t('submit_register') : t('submit_login')) ?></button>
         </form>
-      <?php endif; ?>
     </div>
   </div>
 </section>
+<?php endif; ?>
 
 <section class="block" style="padding-top:0">
   <div class="wrap">
@@ -543,10 +689,11 @@ $langCount = (string)count(availableLangs());
     </div>
   </div>
 </section>
+<?php endif; ?>
 
 <footer>
   <div class="wrap">
-    <span>▦ Invoice — <?= e(t('foot_note')) ?></span>
+    <span>©2026 &nbsp;<img class="foot-ico" src="<?= $favicon ?>" alt="">&nbsp;Inquistador — <?= e(t('foot_note')) ?></span>
     <a href="/preview/"><?= e(t('pdf_templates')) ?></a>
   </div>
 </footer>
