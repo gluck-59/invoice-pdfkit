@@ -172,9 +172,9 @@ try {
         $email = trim((string)($_POST['email'] ?? ''));
         $password = (string)($_POST['password'] ?? '');
         $needsCredentials = ($action === 'register' || $action === 'login');
-        if ($needsCredentials && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = t('err_invalid_email');
-        }
+//        if ($needsCredentials && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+//            $errors[] = t('err_invalid_email');
+//        }
 //        if (strlen($password) < 8) {
 //            $errors[] = t('err_password_short');
 //        }
@@ -377,6 +377,32 @@ try {
                         }
                     }
                 }
+            }
+        } elseif ($action === 'delete_company') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            $cid = (int)($_POST['company_id'] ?? 0);
+            if ($cid <= 0 || !ownCompany($mysqli, $cid, $uid)) {
+                $errors[] = t('err_no_company');
+            } else {
+                $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+                $st->bind_param('ii', $cid, $uid);
+                $st->execute();
+                $st->bind_result($img);
+                if ($st->fetch() && $img) {
+                    @unlink(UPLOADS_DIR . '/' . basename((string)$img));
+                }
+                $st->close();
+                $st = $mysqli->prepare('DELETE FROM companies WHERE id = ? AND user_id = ?');
+                $st->bind_param('ii', $cid, $uid);
+                $st->execute();
+                $st->close();
+                header('Location: /?mode=cabinet&saved=delete');
+                exit;
             }
         }
     }
@@ -612,6 +638,8 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       <div class="ok"><?= e(t('saved_company')) ?></div>
     <?php elseif ($saved === 'logo'): ?>
       <div class="ok"><?= e(t('saved_logo')) ?></div>
+    <?php elseif ($saved === 'delete'): ?>
+      <div class="ok"><?= e(t('saved_delete')) ?></div>
     <?php endif; ?>
     <?php foreach ($errors as $err): ?>
       <div class="err" style="max-width:720px;margin:0 auto 12px"><?= e($err) ?></div>
@@ -619,7 +647,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 
     <?php if ($cabCompanies): ?>
     <h3 class="cab-h"><?= e(t('my_companies')) ?></h3>
-    <table class="cab-table">
+    <table id="companies" class="cab-table">
       <?php foreach ($cabCompanies as $c): ?>
       <tr<?= $cabCompany && (int)$cabCompany['id'] === (int)$c['id'] ? ' class="sel"' : '' ?>>
         <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e((string)($c['data']['company'] ?? ('#' . $c['id']))) ?></a></td>
@@ -630,6 +658,13 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
             <div class="noimg">NO IMAGE</div>
           <?php endif; ?>
         </td>
+        <td class="act">
+          <form method="post" action="/?mode=cabinet" onsubmit="return confirm('<?= e(t('confirm_delete')) ?>')">
+            <input type="hidden" name="action" value="delete_company">
+            <input type="hidden" name="company_id" value="<?= (int)$c['id'] ?>">
+            <button class="btn ghost small" type="submit"><?= e(t('delete')) ?></button>
+          </form>
+        </td>
       </tr>
       <?php endforeach; ?>
     </table>
@@ -639,7 +674,26 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
     <h3 class="cab-h"><?= e($cabCompany ? t('edit') . ' ' . $cabCompany['data']['company'] : t('new_company')) ?>
       <small class="muted"><?= t('non_required')?></small>
     </h3>
-    <form method="post" action="/?mode=cabinet<?= $cabCompany ? '&company=' . (int)$cabCompany['id'] : '' ?>" class="cab-form">
+
+    <hr>
+
+      <?php if ($cabCompany): ?>
+          <form id="logo" class="cab-form" method="post" action="/?mode=cabinet&company=<?= (int)$cabCompany['id'] ?>" enctype="multipart/form-data">
+              <input type="hidden" name="action" value="upload_logo">
+              <input type="hidden" name="company_id" value="<?= (int)$cabCompany['id'] ?>">
+              <div class="drop" id="drop">
+                  <span><?= e(t('logo_drop')) ?></span>
+                  <small><?= e(t('logo_hint')) ?></small>
+                  <input type="file" name="logo" id="logo-file" accept=".jpg,.jpeg,.png,.gif,.svg" hidden>
+              </div>
+              <button class="btn primary" type="submit" style="margin-top:12px"><?= e(t('save')) ?></button>
+          </form>
+          <script src="/js/app.js" defer></script>
+          <hr>
+      <?php endif; ?>
+
+
+      <form method="post" action="/?mode=cabinet<?= $cabCompany ? '&company=' . (int)$cabCompany['id'] : '' ?>" class="cab-form">
       <input type="hidden" name="action" value="save_company">
       <input type="hidden" name="company_id" value="<?= $cabCompany ? (int)$cabCompany['id'] : '' ?>">
       <?php foreach (COMPANY_FIELDS as $f): ?>
@@ -652,24 +706,9 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
     </form>
 
-    <?php if ($cabCompany): ?>
-    <h3 class="cab-h"><?= e(t('cab_logo')) ?></h3>
-    <form method="post" action="/?mode=cabinet&company=<?= (int)$cabCompany['id'] ?>" enctype="multipart/form-data">
-      <input type="hidden" name="action" value="upload_logo">
-      <input type="hidden" name="company_id" value="<?= (int)$cabCompany['id'] ?>">
-      <div class="drop" id="drop">
-        <span><?= e(t('logo_drop')) ?></span>
-        <small><?= e(t('logo_hint')) ?></small>
-        <input type="file" name="logo" id="logo-file" accept=".jpg,.jpeg,.png,.gif,.svg" hidden>
-      </div>
-      <button class="btn primary" type="submit" style="margin-top:12px"><?= e(t('save')) ?></button>
-    </form>
-    <script src="/js/app.js" defer></script>
-    <?php endif; ?>
+      <hr>
 
-    <hr>
-
-    <h3 class="cab-h"><?= e(t('your_data')) ?></h3>
+      <h3 class="cab-h"><?= e(t('your_data')) ?></h3>
     <form method="post" action="/?mode=cabinet" class="cab-form">
       <input type="hidden" name="action" value="update_email">
       <label><?= e(t('email')) ?><input type="email" name="email" required value="<?= e($userEmail) ?>"></label>
@@ -760,7 +799,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
         <?php endforeach; ?>
         <form method="post" action="/<?= $isReg ? '?mode=register' : '?mode=login' ?>#start">
           <input type="hidden" name="action" value="<?= $isReg ? 'register' : 'login' ?>">
-          <input type="email" name="email" placeholder="<?= e(t('email')) ?>" required
+          <input type="text" name="email" placeholder="<?= e(t('email')) ?>" required
             value="<?= e(trim((string)($_POST['email'] ?? ''))) ?>">
           <input type="password" name="password" placeholder="<?= e(t('password')) ?>" required>
           <?php if ($isReg): ?>

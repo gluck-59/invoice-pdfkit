@@ -16,7 +16,7 @@
     color: var(--txt);
   }
   hr {
-    margin: 60px 0;
+    margin: 40px 0;
     border: 1px solid var(--line);
   }
   .muted { color: gray; font-weight: 100;}
@@ -197,6 +197,8 @@
   .cab-h { font-size: 20px; margin: 36px 0 14px; }
   .cab-table { width: 100%; max-width: 720px; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
   .cab-table th, .cab-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; font-size: 15px; }
+  .cab-table th, .cab-table td.act { text-align: right;}
+  .cab-table th, .cab-table td.act .btn { background-color: var(--acc-d) }
   .cab-table tr.sel td { background: rgba(201,161,59,.08); }
   .cab-table a { color: var(--acc); }
   .thumb img { width: 64px; height: 40px; object-fit: contain; background: #fff; border-radius: 6px; display: block; }
