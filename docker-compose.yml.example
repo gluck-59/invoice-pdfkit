@@ -21,6 +21,7 @@ services:
       - ./php-app/public:/var/www/html:ro
       - ./php-app/uploads:/var/www/uploads
       - ./locales:/var/www/locales:ro
+      - ./fonts:/var/www/fonts:ro
     environment:
       MYSQL_HOST: mysql
       MYSQL_DATABASE: ${MYSQL_DATABASE:-invoices}
@@ -40,6 +41,7 @@ services:
       # Dev: host public/ masks the image copy, so prototype edits apply
       # without rebuilding the image.
       - ./public:/app/public:ro
+      - ./fonts:/app/fonts:ro
     environment:
       NODE_ENV: production
       PORT: 3000

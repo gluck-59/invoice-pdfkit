@@ -122,7 +122,9 @@
   "non_required": "Alle Felder sind optional — nach eigenem Ermessen ausfüllen.",
 
   "cabinet": "Konto",
-  "my_companies": "Meine Firmen",
+  "my_companies": "Firmen",
+  "my_invoices": "Rechnungen",
+  "settings": "Einstellungen",
   "th_company": "Firma",
   "th_logo": "Logo",
   "edit": "Bearbeiten",

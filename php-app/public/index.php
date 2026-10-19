@@ -204,7 +204,7 @@ try {
                 $st->close();
                 $_SESSION['user_id'] = $id;
                 $_SESSION['user_email'] = $email;
-                header('Location: /?mode=cabinet');
+                header('Location: /?mode=cabinet&view=companies');
                 exit;
             }
         } elseif ($action === 'login') {
@@ -250,7 +250,7 @@ try {
                 $st->execute();
                 $st->close();
                 $_SESSION['user_email'] = $email;
-                header('Location: /?mode=cabinet&saved=email');
+                header('Location: /?mode=cabinet&view=settings&saved=email');
                 exit;
             }
         } elseif ($action === 'update_password') {
@@ -279,7 +279,7 @@ try {
                 $st->bind_param('si', $nh, $uid);
                 $st->execute();
                 $st->close();
-                header('Location: /?mode=cabinet&saved=password');
+                header('Location: /?mode=cabinet&view=settings&saved=password');
                 exit;
             }
         } elseif ($action === 'save_company') {
@@ -318,7 +318,7 @@ try {
                     $cid = $st->insert_id;
                 }
                 $st->close();
-                header('Location: /?mode=cabinet&company=' . $cid . '&saved=company');
+                header('Location: /?mode=cabinet&view=companies&company=' . $cid . '&saved=company');
                 exit;
             }
         } elseif ($action === 'upload_logo') {
@@ -373,7 +373,7 @@ try {
                             $st->bind_param('sii', $name, $cid, $uid);
                             $st->execute();
                             $st->close();
-                            header('Location: /?mode=cabinet&company=' . $cid . '&saved=logo');
+                            header('Location: /?mode=cabinet&view=companies&company=' . $cid . '&saved=logo');
                             exit;
                         }
                     }
@@ -402,7 +402,7 @@ try {
                 $st->bind_param('ii', $cid, $uid);
                 $st->execute();
                 $st->close();
-                header('Location: /?mode=cabinet&saved=delete');
+                header('Location: /?mode=cabinet&view=companies&saved=delete');
                 exit;
             }
         }
@@ -571,6 +571,11 @@ if (!$userEmail && $mode === 'cabinet') {
 }
 $isCabinet = ($mode === 'cabinet' && (bool)$userEmail);
 $saved = $_GET['saved'] ?? '';
+// Cabinet sub-view: ?view=companies|invoices. A company selection implies the
+// companies view. Empty means the cabinet shows only the entry cards.
+$cabView = in_array($_GET['view'] ?? '', ['companies', 'invoices', 'settings'], true)
+    ? $_GET['view']
+    : (isset($_GET['company']) ? 'companies' : '');
 $title = $mode === 'register' ? t('register') : ($mode === 'login' ? t('login') : ($mode === 'cabinet' ? t('cabinet') : t('app_title')));
 $langCount = (string)count(availableLangs());
 $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='12' fill='%23C9A13B'/%3E%3Ctext x='32' y='44' font-family='Georgia, serif' font-weight='bold' font-size='34' fill='%239E252B' text-anchor='middle'%3EIn%3C/text%3E%3C/svg%3E";
@@ -602,7 +607,8 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
     <nav class="nav-links">
       <?php if ($isCabinet): ?>
         <a href="/preview/" target="_blank"><?= e(t('preview')) ?></a>
-        <a href="/?mode=cabinet#cabinet"><?= e(t('my_companies')) ?></a>
+        <a href="/?mode=cabinet&view=companies"><?= e(t('my_companies')) ?></a>
+        <a href="/?mode=cabinet&view=invoices"><?= e(t('my_invoices')) ?></a>
       <?php else: ?>
         <a href="#features"><?= e(t('nav_features')) ?></a>
         <a href="#how"><?= e(t('nav_how')) ?></a>
@@ -617,13 +623,16 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       </select>
       <!-- Logged in: e-mail + logout; guest: login / register buttons. -->
       <?php if ($userEmail): ?>
-        <span class="nav-mail"><?= e($userEmail) ?></span>
+        <div class="nav-user">
+<!--          <span class="nav-mail">--><?php //= e($userEmail) ?><!--</span>-->
+          <a class="btn primary small" href="/?mode=cabinet"><?= e($userEmail) ?></a>
+        </div>
         <?php if (!$isCabinet): ?>
           <a class="btn ghost small" href="/?mode=cabinet"><?= e(t('cabinet')) ?></a>
         <?php endif; ?>
         <form method="post" action="/" style="margin:0">
           <input type="hidden" name="action" value="logout">
-          <button class="btn ghost small" type="submit"><?= e(t('logout')) ?></button>
+          <button class="btn secondary small" type="submit"><?= e(t('logout')) ?></button>
         </form>
       <?php else: ?>
         <a class="btn ghost small" href="/?mode=login#start"><?= e(t('nav_login')) ?></a>
@@ -634,7 +643,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 </header>
 
 <?php if ($isCabinet): ?>
-<!-- Cabinet: only when mode=cabinet and a session exists (list, editor, account). -->
+<!-- Cabinet: only when mode=cabinet and a session exists (cards, sub-sections). -->
 <section class="block" id="cabinet">
   <div class="wrap">
     <h2><?= e(t('cabinet')) ?></h2>
@@ -654,84 +663,15 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       <div class="err" style="max-width:720px;margin:0 auto 12px"><?= e($err) ?></div>
     <?php endforeach; ?>
 
-    <?php if ($cabCompanies): ?>
-    <h3 class="cab-h"><?= e(t('my_companies')) ?></h3>
-    <table id="companies" class="cab-table">
-      <?php foreach ($cabCompanies as $c): ?>
-      <tr<?= $cabCompany && (int)$cabCompany['id'] === (int)$c['id'] ? ' class="sel"' : '' ?>>
-        <td><a href="/?mode=cabinet&company=<?= (int)$c['id'] ?>"><?= e((string)($c['data']['company'] ?? ('#' . $c['id']))) ?></a></td>
-        <td class="thumb">
-          <?php if (!empty($c['img'])): ?>
-            <img src="/?mode=logo&id=<?= (int)$c['id'] ?>" alt="logo">
-          <?php else: ?>
-            <div class="noimg">NO IMAGE</div>
-          <?php endif; ?>
-        </td>
-        <td class="act">
-          <form method="post" action="/?mode=cabinet" onsubmit="return confirm('<?= e(t('confirm_delete')) ?>')">
-            <input type="hidden" name="action" value="delete_company">
-            <input type="hidden" name="company_id" value="<?= (int)$c['id'] ?>">
-            <button class="btn ghost small" type="submit"><?= e(t('delete')) ?></button>
-          </form>
-        </td>
-      </tr>
-      <?php endforeach; ?>
-    </table>
-    <?php endif;
-    ?>
-
-    <h3 class="cab-h"><?= e($cabCompany ? t('edit') . ' ' . $cabCompany['data']['company'] : t('new_company')) ?>
-      <small class="muted"><?= t('non_required')?></small>
-    </h3>
-
-    <hr>
-
-      <?php if ($cabCompany): ?>
-          <form id="logo" class="cab-form" method="post" action="/?mode=cabinet&company=<?= (int)$cabCompany['id'] ?>" enctype="multipart/form-data">
-              <input type="hidden" name="action" value="upload_logo">
-              <input type="hidden" name="company_id" value="<?= (int)$cabCompany['id'] ?>">
-              <div class="drop" id="drop">
-                  <span><?= e(t('logo_drop')) ?></span>
-                  <small><?= e(t('logo_hint')) ?></small>
-                  <input type="file" name="logo" id="logo-file" accept=".jpg,.jpeg,.png,.gif,.svg" hidden>
-              </div>
-              <button class="btn primary" type="submit" style="margin-top:12px"><?= e(t('save')) ?></button>
-          </form>
-          <script src="/js/app.js" defer></script>
-          <hr>
-      <?php endif; ?>
-
-
-      <form method="post" action="/?mode=cabinet<?= $cabCompany ? '&company=' . (int)$cabCompany['id'] : '' ?>" class="cab-form">
-      <input type="hidden" name="action" value="save_company">
-      <input type="hidden" name="company_id" value="<?= $cabCompany ? (int)$cabCompany['id'] : '' ?>">
-      <?php foreach (COMPANY_FIELDS as $f): ?>
-        <?php if ($f === 'terms'): ?>
-          <label><?= e(t('cf_terms')) ?><textarea name="cf_terms" rows="3"><?= e(implode("\n", (array)($cabCompany['data']['terms'] ?? []))) ?></textarea></label>
-        <?php else: ?>
-          <label><?= e(t('cf_' . $f)) ?><input name="cf_<?= e($f) ?>" value="<?= e((string)($cabCompany['data'][$f] ?? '')) ?>"></label>
-        <?php endif; ?>
-      <?php endforeach; ?>
-      <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
-    </form>
-
-      <hr>
-
-      <h3 class="cab-h"><?= e(t('your_data')) ?></h3>
-    <form method="post" action="/?mode=cabinet" class="cab-form">
-      <input type="hidden" name="action" value="update_email">
-      <label><?= e(t('email')) ?><input type="email" name="email" required value="<?= e($userEmail) ?>"></label>
-      <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
-    </form>
-
-    <h3 class="cab-h"><?= e(t('cab_password')) ?></h3>
-    <form method="post" action="/?mode=cabinet" class="cab-form">
-      <input type="hidden" name="action" value="update_password">
-      <label><?= e(t('cur_password')) ?><input type="password" name="current" required autocomplete="current-password"></label>
-      <label><?= e(t('new_password')) ?><input type="password" name="new" required autocomplete="new-password"></label>
-      <label><?= e(t('confirm_password')) ?><input type="password" name="confirm" required autocomplete="new-password"></label>
-      <button class="btn primary" type="submit"><?= e(t('save')) ?></button>
-    </form>
+    <?php define('CABINET_PART', true); ?>
+    <?php include __DIR__ . '/cabinet-menu.php'; ?>
+    <?php if ($cabView === 'companies'): ?>
+      <?php include __DIR__ . '/cabinet-companies.php'; ?>
+    <?php elseif ($cabView === 'invoices'): ?>
+      <?php include __DIR__ . '/cabinet-invoices.php'; ?>
+    <?php elseif ($cabView === 'settings'): ?>
+      <?php include __DIR__ . '/cabinet-settings.php'; ?>
+    <?php endif; ?>
   </div>
 </section>
 <?php endif; ?>

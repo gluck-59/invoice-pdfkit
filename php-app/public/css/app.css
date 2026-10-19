@@ -1,3 +1,13 @@
+  @font-face {
+    font-family: "Open Sans";
+    src: url("/fonts/OpenSans-Regular.ttf") format("truetype");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Open Sans";
+    src: url("/fonts/OpenSans-ExtraBold.ttf") format("truetype");
+    font-weight: 800;
+  }
   * { box-sizing: border-box; }
   :root {
     --bg: #202a35;
@@ -11,7 +21,7 @@
   }
   body {
     margin: 0;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "Open Sans", sans-serif;
     background: var(--bg);
     color: var(--txt);
   }
@@ -34,23 +44,26 @@
   .brand span { color: var(--acc); }
   .nav-links { display: flex; gap: 22px; margin-left: 12px; }
   .nav-links a { color: var(--mut); text-decoration: none; font-size: 15px; }
-  .nav-links a:hover { color: var(--txt); }
+  /*.nav-links a:hover { color: var(--txt); }*/
   .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
   .nav-mail { color: var(--mut); font-size: 14px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-user { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
   .btn {
     display: inline-block;
     padding: 11px 22px;
     border-radius: 10px;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 100;
     text-decoration: none;
     cursor: pointer;
     border: 0;
   }
   .btn.primary { background: var(--acc); color: #202a35; }
-  .btn.primary:hover { background: #ddb84e; }
+  /*.btn.primary:hover { background: #ddb84e; }*/
+  .btn.secondary { background: var(--acc-d); color: var(--txt) }
+  /*.btn.secondary:hover { background: #ddb84e; }*/
   .btn.ghost { background: transparent; color: var(--txt); border: 1px solid var(--line); }
-  .btn.ghost:hover { border-color: var(--acc); }
+  /*.btn.ghost:hover { border-color: var(--acc); }*/
   .btn.small { padding: 8px 16px; font-size: 14px; }
   .langsel {
     background: transparent;
@@ -114,9 +127,11 @@
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 14px;
-    padding: 28px;
+    padding: 20px;
   }
   .tile.wide { grid-column: 1 / -1; }
+  a.tile { display: block; color: inherit; text-decoration: none; line-height: 0; }
+  a.tile:hover, .btn:hover { opacity: 0.6; }
   .tile h3 { margin: 0 0 10px; font-size: 19px; }
   .tile p { margin: 0; color: var(--mut); font-size: 15px; line-height: 1.6; }
   .tile .ico { font-size: 26px; }
@@ -195,6 +210,7 @@
     font-size: 14px;
   }
   .cab-h { font-size: 20px; margin: 36px 0 14px; }
+  .cab-cards { display: flex; flex-wrap: wrap; gap: 16px; }
   .cab-table { width: 100%; max-width: 720px; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
   .cab-table th, .cab-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; font-size: 15px; }
   .cab-table th, .cab-table td.act { text-align: right;}

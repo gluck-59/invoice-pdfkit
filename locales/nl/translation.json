@@ -122,7 +122,9 @@
   "non_required": "Alle velden zijn optioneel — vul naar eigen inzicht in.",
 
   "cabinet": "Account",
-  "my_companies": "Mijn bedrijven",
+  "my_companies": "Bedrijven",
+  "my_invoices": "Facturen",
+  "settings": "Instellingen",
   "th_company": "Bedrijf",
   "th_logo": "Logo",
   "edit": "Bewerken",

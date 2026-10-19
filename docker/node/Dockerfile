@@ -15,7 +15,6 @@ RUN npm ci --omit=dev --no-audit --no-fund \
 COPY index.js server.js ./
 COPY src/ ./src/
 COPY locales/ ./locales/
-COPY fonts/ ./fonts/
 COPY public/ ./public/
 
 ENV NODE_ENV=production PORT=3000
