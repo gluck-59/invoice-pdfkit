@@ -9,6 +9,8 @@ const LOGO_MAX_BYTES = 2097152; // 2 MB
 const LOGO_EXTS = ['jpg', 'png', 'gif', 'svg'];
 // Company field set mirrors DEMO.company in server.js.
 const COMPANY_FIELDS = ['company', 'addr1', 'city', 'zip', 'state', 'country', 'tel', 'web', 'email', 'account', 'bankID', 'registration', 'taxID', 'termsURL', 'terms', 'tagline'];
+// Document field set: same fields as a company for now; documents have no logo.
+const DOCUMENT_FIELDS = COMPANY_FIELDS;
 
 function envv(string $name, string $default = ''): string
 {
@@ -25,6 +27,18 @@ function ownCompany(mysqli $db, int $cid, int $uid): bool
 {
     $st = $db->prepare('SELECT id FROM companies WHERE id = ? AND user_id = ?');
     $st->bind_param('ii', $cid, $uid);
+    $st->execute();
+    $st->store_result();
+    $ok = $st->num_rows > 0;
+    $st->close();
+    return $ok;
+}
+
+// Document ownership check, mirroring ownCompany.
+function ownDocument(mysqli $db, int $did, int $uid): bool
+{
+    $st = $db->prepare('SELECT id FROM documents WHERE id = ? AND user_id = ?');
+    $st->bind_param('ii', $did, $uid);
     $st->execute();
     $st->store_result();
     $ok = $st->num_rows > 0;
@@ -159,9 +173,41 @@ try {
                 REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
+    // Documents: a user's stored documents. type keeps the document kind (only
+    // invoice for now) so more kinds can share this table later. One-time
+    // migration: the former invoices table is renamed and gains the type column.
+    $st = $mysqli->query("SHOW TABLES LIKE 'invoices'");
+    if ($st && $st->num_rows > 0) {
+        $mysqli->query('RENAME TABLE invoices TO documents');
+    }
+    $mysqli->query(
+        "CREATE TABLE IF NOT EXISTS documents (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            type ENUM('invoice') NOT NULL DEFAULT 'invoice',
+            data JSON NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_documents_user FOREIGN KEY (user_id)
+                REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    );
+    $st = $mysqli->query("SHOW COLUMNS FROM documents LIKE 'type'");
+    if ($st && $st->num_rows === 0) {
+        $mysqli->query("ALTER TABLE documents ADD COLUMN type ENUM('invoice') NOT NULL DEFAULT 'invoice' AFTER user_id");
+    }
+    $st = $mysqli->query(
+        "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'documents'
+           AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = 'fk_invoices_user'"
+    );
+    if ($st && $st->num_rows > 0) {
+        $mysqli->query('ALTER TABLE documents DROP FOREIGN KEY fk_invoices_user');
+        $mysqli->query('ALTER TABLE documents ADD CONSTRAINT fk_documents_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE');
+    }
 
     // POST actions: logout / register / login / update_email / update_password /
-    // save_company / upload_logo / delete_company. Each redirects on success.
+    // save_company / upload_logo / delete_company / save_document / delete_document.
+    // Each redirects on success.
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $action = $_POST['action'] ?? '';
         if ($action === 'logout') {
@@ -405,6 +451,63 @@ try {
                 header('Location: /?mode=cabinet&view=companies&saved=delete');
                 exit;
             }
+        } elseif ($action === 'save_document') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            $did = (int)($_POST['document_id'] ?? 0);
+            if ($did > 0 && !ownDocument($mysqli, $did, $uid)) {
+                $errors[] = t('err_no_document');
+            } else {
+                $data = [];
+                foreach (DOCUMENT_FIELDS as $f) {
+                    if ($f === 'terms') {
+                        $lines = preg_split('/\r\n|\r|\n/', (string)($_POST['cf_terms'] ?? ''));
+                        $data[$f] = array_values(array_filter(
+                            array_map('trim', $lines ?: []),
+                            fn($s) => $s !== ''
+                        ));
+                    } else {
+                        $data[$f] = trim((string)($_POST['cf_' . $f] ?? ''));
+                    }
+                }
+                $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+                if ($did > 0) {
+                    $st = $mysqli->prepare('UPDATE documents SET data = ? WHERE id = ? AND user_id = ?');
+                    $st->bind_param('sii', $json, $did, $uid);
+                } else {
+                    $st = $mysqli->prepare('INSERT INTO documents (user_id, data) VALUES (?, ?)');
+                    $st->bind_param('is', $uid, $json);
+                }
+                $st->execute();
+                if ($did === 0) {
+                    $did = $st->insert_id;
+                }
+                $st->close();
+                header('Location: /?mode=cabinet&view=invoices&invoice=' . $did . '&saved=invoice');
+                exit;
+            }
+        } elseif ($action === 'delete_document') {
+            $mode = 'cabinet';
+            $uid = $_SESSION['user_id'] ?? null;
+            if (!$uid) {
+                header('Location: /?mode=login');
+                exit;
+            }
+            $did = (int)($_POST['document_id'] ?? 0);
+            if ($did <= 0 || !ownDocument($mysqli, $did, $uid)) {
+                $errors[] = t('err_no_document');
+            } else {
+                $st = $mysqli->prepare('DELETE FROM documents WHERE id = ? AND user_id = ?');
+                $st->bind_param('ii', $did, $uid);
+                $st->execute();
+                $st->close();
+                header('Location: /?mode=cabinet&view=invoices&saved=delete_invoice');
+                exit;
+            }
         }
     }
     // Logo bytes (mode=logo): serve the owner's logo file, 404 otherwise.
@@ -457,30 +560,48 @@ try {
         $company['terms'] = [];
         $logoB64 = null;
         $cid = (int)($_GET['company'] ?? 0);
-        if ($cid > 0) {
-            $st = $mysqli->prepare('SELECT data, img FROM companies WHERE id = ? AND user_id = ?');
-            $st->bind_param('ii', $cid, $uid);
+        $did = (int)($_GET['invoice'] ?? 0);
+        if ($did > 0) {
+            // Document preview: same fields as a company, never a logo.
+            $st = $mysqli->prepare('SELECT data FROM documents WHERE id = ? AND user_id = ?');
+            $st->bind_param('ii', $did, $uid);
+            $st->execute();
+            $st->bind_result($cData);
+            if ($st->fetch()) {
+                $row = json_decode((string)$cData, true) ?: [];
+                foreach (DOCUMENT_FIELDS as $f) {
+                    if (array_key_exists($f, $row)) {
+                        $company[$f] = $row[$f];
+                    }
+                }
+            }
+            $st->close();
         } else {
-            $st = $mysqli->prepare('SELECT data, img FROM companies WHERE user_id = ? ORDER BY id LIMIT 1');
-            $st->bind_param('i', $uid);
-        }
-        $st->execute();
-        $st->bind_result($cData, $cImg);
-        if ($st->fetch()) {
-            $row = json_decode((string)$cData, true) ?: [];
-            foreach (COMPANY_FIELDS as $f) {
-                if (array_key_exists($f, $row)) {
-                    $company[$f] = $row[$f];
+            if ($cid > 0) {
+                $st = $mysqli->prepare('SELECT data, img FROM companies WHERE id = ? AND user_id = ?');
+                $st->bind_param('ii', $cid, $uid);
+            } else {
+                $st = $mysqli->prepare('SELECT data, img FROM companies WHERE user_id = ? ORDER BY id LIMIT 1');
+                $st->bind_param('i', $uid);
+            }
+            $st->execute();
+            $st->bind_result($cData, $cImg);
+            if ($st->fetch()) {
+                $row = json_decode((string)$cData, true) ?: [];
+                foreach (COMPANY_FIELDS as $f) {
+                    if (array_key_exists($f, $row)) {
+                        $company[$f] = $row[$f];
+                    }
+                }
+                if ($cImg) {
+                    $p = UPLOADS_DIR . '/' . basename((string)$cImg);
+                    if (is_file($p)) {
+                        $logoB64 = base64_encode((string)file_get_contents($p));
+                    }
                 }
             }
-            if ($cImg) {
-                $p = UPLOADS_DIR . '/' . basename((string)$cImg);
-                if (is_file($p)) {
-                    $logoB64 = base64_encode((string)file_get_contents($p));
-                }
-            }
+            $st->close();
         }
-        $st->close();
 
         $settings = [
             'company' => $company,
@@ -535,6 +656,8 @@ try {
     // Cabinet data for the page: the logged-in user's companies + the selected one.
     $cabCompanies = [];
     $cabCompany = null;
+    $cabDocuments = [];
+    $cabDocument = null;
     $cabUid = $_SESSION['user_id'] ?? null;
     if ($cabUid) {
         $st = $mysqli->prepare('SELECT id, data, img FROM companies WHERE user_id = ? ORDER BY id');
@@ -550,6 +673,22 @@ try {
         foreach ($cabCompanies as $c) {
             if ((int)$c['id'] === $sel) {
                 $cabCompany = $c;
+                break;
+            }
+        }
+        $st = $mysqli->prepare('SELECT id, data FROM documents WHERE user_id = ? ORDER BY id');
+        $st->bind_param('i', $cabUid);
+        $st->execute();
+        $res = $st->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $row['data'] = json_decode((string)$row['data'], true) ?: [];
+            $cabDocuments[] = $row;
+        }
+        $st->close();
+        $dsel = (int)($_GET['invoice'] ?? $_POST['document_id'] ?? 0);
+        foreach ($cabDocuments as $doc) {
+            if ((int)$doc['id'] === $dsel) {
+                $cabDocument = $doc;
                 break;
             }
         }
@@ -571,11 +710,11 @@ if (!$userEmail && $mode === 'cabinet') {
 }
 $isCabinet = ($mode === 'cabinet' && (bool)$userEmail);
 $saved = $_GET['saved'] ?? '';
-// Cabinet sub-view: ?view=companies|invoices. A company selection implies the
-// companies view. Empty means the cabinet shows only the entry cards.
+// Cabinet sub-view: ?view=companies|invoices|settings. A company or document
+// selection implies its view. Empty means the cabinet shows only the cards.
 $cabView = in_array($_GET['view'] ?? '', ['companies', 'invoices', 'settings'], true)
     ? $_GET['view']
-    : (isset($_GET['company']) ? 'companies' : '');
+    : (isset($_GET['company']) ? 'companies' : (isset($_GET['invoice']) ? 'invoices' : ''));
 $title = $mode === 'register' ? t('register') : ($mode === 'login' ? t('login') : ($mode === 'cabinet' ? t('cabinet') : t('app_title')));
 $langCount = (string)count(availableLangs());
 $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='12' fill='%23C9A13B'/%3E%3Ctext x='32' y='44' font-family='Georgia, serif' font-weight='bold' font-size='34' fill='%239E252B' text-anchor='middle'%3EIn%3C/text%3E%3C/svg%3E";
@@ -608,7 +747,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       <?php if ($isCabinet): ?>
         <a href="/preview/" target="_blank"><?= e(t('preview')) ?></a>
         <a href="/?mode=cabinet&view=companies"><?= e(t('my_companies')) ?></a>
-        <a href="/?mode=cabinet&view=invoices"><?= e(t('my_invoices')) ?></a>
+        <a href="/?mode=cabinet&view=invoices"><?= e(t('my_documents')) ?></a>
       <?php else: ?>
         <a href="#features"><?= e(t('nav_features')) ?></a>
         <a href="#how"><?= e(t('nav_how')) ?></a>
@@ -658,6 +797,10 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
       <div class="ok"><?= e(t('saved_logo')) ?></div>
     <?php elseif ($saved === 'delete'): ?>
       <div class="ok"><?= e(t('saved_delete')) ?></div>
+    <?php elseif ($saved === 'invoice'): ?>
+      <div class="ok"><?= e(t('saved_document')) ?></div>
+    <?php elseif ($saved === 'delete_invoice'): ?>
+      <div class="ok"><?= e(t('saved_delete_document')) ?></div>
     <?php endif; ?>
     <?php foreach ($errors as $err): ?>
       <div class="err" style="max-width:720px;margin:0 auto 12px"><?= e($err) ?></div>
