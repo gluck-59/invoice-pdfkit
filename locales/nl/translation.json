@@ -6,6 +6,7 @@
   "receipt": "Betaalbewijs",
   "refund": "Restitutie",
 
+  "issuer": "Afzender",
   "bill_to": "Factuuradres",
   "ship_to": "Bezorgadres",
 
@@ -55,7 +56,7 @@
   "mail_company": "Vervoerder",
   "mail_id": "Traceercode",
 
-  "terms": "Algemene voorwaarden",
+  "terms": "Betalingsgegevens",
   "terms_site": "Volledige algemene voorwaarden worden beschreven op",
   "terms_expire": "Offerte is geldig tot en met de verloopdatum.",
   "terms_due": "Factuur dient uiterlijk betaald te worden op de vervaldatum.",

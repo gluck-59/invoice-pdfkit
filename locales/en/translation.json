@@ -6,6 +6,7 @@
   "receipt": "Receipt",
   "refund": "Refund",
 
+  "issuer": "Issuer",
   "bill_to": "Bill To",
   "ship_to": "Ship To",
 
@@ -55,7 +56,7 @@
   "mail_company": "Carrier",
   "mail_id": "Tracking code",
 
-  "terms": "Terms & Conditions",
+  "terms": "Payment details",
   "terms_site": "Full terms and conditions are described at",
   "terms_expire": "Quotation is valid until the expiry date.",
   "terms_due": "Invoice must be paid no later than the due date.",

@@ -1,9 +1,5 @@
 <?php
 declare(strict_types=1);
-// Landing + регистрация/вход в одном файле (MVP, без CSRF и e-mail).
-// Таблица users создаётся сама при первом обращении.
-// Язык: ?lang= → cookie pdf-lang → Accept-Language → en.
-// Переводы: те же locales/*/translation.json, что и у генератора, через t().
 session_start();
 
 const LOCALES_DIR = '/var/www/locales';
@@ -119,6 +115,8 @@ function t(string $key, string $fallback = ''): string
 $lang = currentLang();
 $dbError = '';
 $errors = [];
+// Requested view: ?mode=… (also the /preview path), limited to known modes.
+// Empty means the public landing page.
 $mode = $_GET['mode'] ?? '';
 $reqPath = rtrim((string)parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/');
 if ($reqPath === '/preview') {
@@ -130,6 +128,7 @@ if ($mode !== 'register' && $mode !== 'login' && $mode !== 'cabinet'
     $mode = '';
 }
 
+// Database: connect and bootstrap the schema on first request (users, companies).
 try {
     $mysqli = @new mysqli(
         envv('MYSQL_HOST', 'mysql'),
@@ -161,6 +160,8 @@ try {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
 
+    // POST actions: logout / register / login / update_email / update_password /
+    // save_company / upload_logo / delete_company. Each redirects on success.
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $action = $_POST['action'] ?? '';
         if ($action === 'logout') {
@@ -406,7 +407,7 @@ try {
             }
         }
     }
-    // Logo bytes: owner-checked, served by PHP (nginx has no uploads mount).
+    // Logo bytes (mode=logo): serve the owner's logo file, 404 otherwise.
     if ($mode === 'logo' && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         $uid = $_SESSION['user_id'] ?? null;
         $lid = (int)($_GET['id'] ?? 0);
@@ -438,10 +439,11 @@ try {
         exit;
     }
 
-    // PDF preview: the generator (node) has no DB access, so PHP assembles the
-    // current user's company data and forwards it to the render API. header/
-    // footer come from public/header.html + public/footer.html; body is pdfkit.
-    // No data entered yet -> empty fields are rendered.
+    // PDF preview (mode=preview, logged-in only; guests go to login): the
+    // generator (node) has no DB access, so PHP assembles the current user's
+    // company data and forwards it to the render API. header/footer come from
+    // public/header.html + public/footer.html; body is pdfkit. No data entered
+    // yet -> empty fields are rendered.
     if ($mode === 'preview') {
         $uid = $_SESSION['user_id'] ?? null;
         if (!$uid) {
@@ -530,7 +532,7 @@ try {
         exit;
     }
 
-    // Cabinet data for the page below.
+    // Cabinet data for the page: the logged-in user's companies + the selected one.
     $cabCompanies = [];
     $cabCompany = null;
     $cabUid = $_SESSION['user_id'] ?? null;
@@ -557,6 +559,8 @@ try {
     $dbError = $ex->getMessage();
 }
 
+// Page-level flags: the cabinet view requires a session; guests hitting it are
+// sent to login, and logged-in users are kept off the register/login screens.
 $userEmail = $_SESSION['user_email'] ?? null;
 if (!$userEmail && $mode === 'cabinet') {
     $mode = 'login';
@@ -583,15 +587,18 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 <body>
 
 <?php if ($dbError): ?>
+<!-- DB error view: only when the MySQL connection or schema bootstrap failed. -->
 <div class="wrap" style="padding:60px 24px;text-align:center">
   <h1><?= e(t('err_db')) ?></h1>
   <p class="sub"><?= e(t('err_db_hint')) ?></p>
 </div>
 <?php else: ?>
 
+<!-- Top navigation: always shown in the normal (non-error) view. -->
 <header class="nav">
   <div class="wrap nav-in">
     <a class="brand" href="/"><span><img class="foot-ico" src="<?= $favicon ?>" alt=""></span> Inquistador</a>
+    <!-- Cabinet links inside the cabinet, landing anchors otherwise. -->
     <nav class="nav-links">
       <?php if ($isCabinet): ?>
         <a href="/preview/" target="_blank"><?= e(t('preview')) ?></a>
@@ -608,6 +615,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
           <option value="<?= e($l) ?>"<?= $l === $lang ? ' selected' : '' ?>><?= e($l) ?></option>
         <?php endforeach; ?>
       </select>
+      <!-- Logged in: e-mail + logout; guest: login / register buttons. -->
       <?php if ($userEmail): ?>
         <span class="nav-mail"><?= e($userEmail) ?></span>
         <?php if (!$isCabinet): ?>
@@ -626,6 +634,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 </header>
 
 <?php if ($isCabinet): ?>
+<!-- Cabinet: only when mode=cabinet and a session exists (list, editor, account). -->
 <section class="block" id="cabinet">
   <div class="wrap">
     <h2><?= e(t('cabinet')) ?></h2>
@@ -728,6 +737,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 <?php endif; ?>
 
 <?php if (!$isCabinet): ?>
+<!-- Landing view: hero, features, how-it-works, guest auth card and CTA. -->
 <div class="hero">
   <div class="wrap hero-grid">
     <div>
@@ -759,6 +769,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
   </div>
 </div>
 
+<!-- Features: landing only. -->
 <section class="block" id="features">
   <div class="wrap">
     <h2><?= e(t('feat_title')) ?></h2>
@@ -772,6 +783,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
   </div>
 </section>
 
+<!-- How it works: landing only. -->
 <section class="block" id="how" style="padding-top:0">
   <div class="wrap">
     <h2><?= e(t('how_title')) ?></h2>
@@ -785,6 +797,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 </section>
 
 <?php if (!$userEmail): ?>
+<!-- Auth card: guests only (no session); toggles between register and login. -->
 <section class="block" id="start" style="padding-top:0">
   <div class="wrap">
     <div class="auth-card" id="start-login">
@@ -812,6 +825,7 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 </section>
 <?php endif; ?>
 
+<!-- Final call to action: landing only. -->
 <section class="block" style="padding-top:0">
   <div class="wrap">
     <div class="cta-band">
@@ -827,10 +841,11 @@ $favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
 </section>
 <?php endif; ?>
 
+<!-- Footer: always shown in the normal (non-error) view. -->
 <footer>
   <div class="wrap">
     <span>©2026 &nbsp;<img class="foot-ico" src="<?= $favicon ?>" alt="">&nbsp;Inquistador — <?= e(t('foot_note')) ?></span>
-    <a href="/preview/"><?= e(t('pdf_templates')) ?></a>
+<!--    <a href="/preview/">--><?php //= e(t('pdf_templates')) ?><!--</a>-->
   </div>
 </footer>
 
