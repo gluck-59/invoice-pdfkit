@@ -23,27 +23,19 @@ function e(string $s): string
     return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 }
 
-function ownCompany(mysqli $db, int $cid, int $uid): bool
+function ownCompany(PDO $db, int $cid, int $uid): bool
 {
     $st = $db->prepare('SELECT id FROM companies WHERE id = ? AND user_id = ?');
-    $st->bind_param('ii', $cid, $uid);
-    $st->execute();
-    $st->store_result();
-    $ok = $st->num_rows > 0;
-    $st->close();
-    return $ok;
+    $st->execute([$cid, $uid]);
+    return $st->fetchColumn() !== false;
 }
 
 // Document ownership check: the document's issuer company must belong to $uid.
-function ownDocument(mysqli $db, int $did, int $uid): bool
+function ownDocument(PDO $db, int $did, int $uid): bool
 {
     $st = $db->prepare('SELECT d.id FROM documents d JOIN companies c ON c.id = d.issuer_id WHERE d.id = ? AND c.user_id = ?');
-    $st->bind_param('ii', $did, $uid);
-    $st->execute();
-    $st->store_result();
-    $ok = $st->num_rows > 0;
-    $st->close();
-    return $ok;
+    $st->execute([$did, $uid]);
+    return $st->fetchColumn() !== false;
 }
 
 function availableLangs(): array
@@ -152,17 +144,13 @@ if ($mode !== 'register' && $mode !== 'login' && $mode !== 'cabinet'
 
 // Database: connect and bootstrap the schema on first request (users, companies).
 try {
-    $mysqli = @new mysqli(
-        envv('MYSQL_HOST', 'mysql'),
+    $db = new PDO(
+        'mysql:host=' . envv('MYSQL_HOST', 'mysql') . ';dbname=' . envv('MYSQL_DATABASE', 'invoices') . ';charset=utf8mb4',
         envv('MYSQL_USER', 'invoices'),
         envv('MYSQL_PASSWORD', 'invoices'),
-        envv('MYSQL_DATABASE', 'invoices')
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
-    if ($mysqli->connect_errno) {
-        throw new RuntimeException($mysqli->connect_error);
-    }
-    $mysqli->set_charset('utf8mb4');
-    $mysqli->query(
+    $db->exec(
         "CREATE TABLE IF NOT EXISTS users (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             email VARCHAR(255) NOT NULL UNIQUE,
@@ -170,7 +158,7 @@ try {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
-    $mysqli->query(
+    $db->exec(
         "CREATE TABLE IF NOT EXISTS companies (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id INT UNSIGNED NOT NULL,
@@ -185,11 +173,11 @@ try {
     // type keeps the document kind (only invoice for now) so more kinds can
     // share this table later. One-time migration: the former invoices table is
     // renamed and gains the type column.
-    $st = $mysqli->query("SHOW TABLES LIKE 'invoices'");
-    if ($st && $st->num_rows > 0) {
-        $mysqli->query('RENAME TABLE invoices TO documents');
+    $st = $db->query("SHOW TABLES LIKE 'invoices'");
+    if ($st->fetchColumn() !== false) {
+        $db->exec('RENAME TABLE invoices TO documents');
     }
-    $mysqli->query(
+    $db->exec(
         "CREATE TABLE IF NOT EXISTS documents (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             issuer_id INT UNSIGNED NOT NULL,
@@ -200,43 +188,43 @@ try {
                 REFERENCES companies(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
-    $st = $mysqli->query("SHOW COLUMNS FROM documents LIKE 'type'");
-    if ($st && $st->num_rows === 0) {
-        $mysqli->query("ALTER TABLE documents ADD COLUMN type ENUM('invoice') NOT NULL DEFAULT 'invoice' AFTER user_id");
+    $st = $db->query("SHOW COLUMNS FROM documents LIKE 'type'");
+    if ($st->fetchColumn() === false) {
+        $db->exec("ALTER TABLE documents ADD COLUMN type ENUM('invoice') NOT NULL DEFAULT 'invoice' AFTER user_id");
     }
-    $st = $mysqli->query(
+    $st = $db->query(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'documents'
            AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = 'fk_invoices_user'"
     );
-    if ($st && $st->num_rows > 0) {
-        $mysqli->query('ALTER TABLE documents DROP FOREIGN KEY fk_invoices_user');
-        $mysqli->query('ALTER TABLE documents ADD CONSTRAINT fk_documents_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE');
+    if ($st->fetchColumn() !== false) {
+        $db->exec('ALTER TABLE documents DROP FOREIGN KEY fk_invoices_user');
+        $db->exec('ALTER TABLE documents ADD CONSTRAINT fk_documents_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE');
     }
     // Migration user_id -> issuer_id (documents belong to an issuing company).
-    $st = $mysqli->query("SHOW COLUMNS FROM documents LIKE 'issuer_id'");
-    if ($st && $st->num_rows === 0) {
-        $mysqli->query("ALTER TABLE documents ADD COLUMN issuer_id INT UNSIGNED NULL AFTER user_id");
+    $st = $db->query("SHOW COLUMNS FROM documents LIKE 'issuer_id'");
+    if ($st->fetchColumn() === false) {
+        $db->exec("ALTER TABLE documents ADD COLUMN issuer_id INT UNSIGNED NULL AFTER user_id");
         // Backfill: each old document gets the user's earliest company.
-        $mysqli->query(
+        $db->exec(
             "UPDATE documents d
              JOIN (SELECT user_id, MIN(id) AS cid FROM companies GROUP BY user_id) m
                ON m.user_id = d.user_id
              SET d.issuer_id = m.cid"
         );
         // Orphans (a user without any company) cannot be adopted; drop them.
-        $mysqli->query('DELETE FROM documents WHERE issuer_id IS NULL');
-        $st = $mysqli->query(
+        $db->exec('DELETE FROM documents WHERE issuer_id IS NULL');
+        $st = $db->query(
             "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'documents'
                AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = 'fk_documents_user'"
         );
-        if ($st && $st->num_rows > 0) {
-            $mysqli->query('ALTER TABLE documents DROP FOREIGN KEY fk_documents_user');
+        if ($st->fetchColumn() !== false) {
+            $db->exec('ALTER TABLE documents DROP FOREIGN KEY fk_documents_user');
         }
-        $mysqli->query('ALTER TABLE documents DROP COLUMN user_id');
-        $mysqli->query('ALTER TABLE documents MODIFY issuer_id INT UNSIGNED NOT NULL');
-        $mysqli->query('ALTER TABLE documents ADD CONSTRAINT fk_documents_issuer FOREIGN KEY (issuer_id) REFERENCES companies(id) ON DELETE CASCADE');
+        $db->exec('ALTER TABLE documents DROP COLUMN user_id');
+        $db->exec('ALTER TABLE documents MODIFY issuer_id INT UNSIGNED NOT NULL');
+        $db->exec('ALTER TABLE documents ADD CONSTRAINT fk_documents_issuer FOREIGN KEY (issuer_id) REFERENCES companies(id) ON DELETE CASCADE');
     }
 
     // GET-delete: row link /?action=delete_document&document_id=N (no form).
@@ -247,11 +235,9 @@ try {
             header('Location: /?mode=login');
             exit;
         }
-        if ($did > 0 && ownDocument($mysqli, $did, $uid)) {
-            $st = $mysqli->prepare('DELETE FROM documents WHERE id = ? AND issuer_id IN (SELECT id FROM companies WHERE user_id = ?)');
-            $st->bind_param('ii', $did, $uid);
-            $st->execute();
-            $st->close();
+        if ($did > 0 && ownDocument($db, $did, $uid)) {
+            $st = $db->prepare('DELETE FROM documents WHERE id = ? AND issuer_id IN (SELECT id FROM companies WHERE user_id = ?)');
+            $st->execute([$did, $uid]);
         }
         header('Location: /?mode=cabinet&view=documents&saved=delete_document');
         exit;
@@ -278,22 +264,17 @@ try {
                 $errors[] = t('err_password_mismatch');
             }
             if (!$errors) {
-                $st = $mysqli->prepare('SELECT id FROM users WHERE email = ?');
-                $st->bind_param('s', $email);
-                $st->execute();
-                $st->store_result();
-                if ($st->num_rows > 0) {
+                $st = $db->prepare('SELECT id FROM users WHERE email = ?');
+                $st->execute([$email]);
+                if ($st->fetchColumn() !== false) {
                     $errors[] = t('err_email_exists');
                 }
-                $st->close();
             }
             if (!$errors) {
                 $hash = password_hash($password, PASSWORD_DEFAULT);
-                $st = $mysqli->prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)');
-                $st->bind_param('ss', $email, $hash);
-                $st->execute();
-                $id = $st->insert_id;
-                $st->close();
+                $st = $db->prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)');
+                $st->execute([$email, $hash]);
+                $id = (int)$db->lastInsertId();
                 $_SESSION['user_id'] = $id;
                 $_SESSION['user_email'] = $email;
                 header('Location: /?mode=cabinet&view=companies');
@@ -302,18 +283,15 @@ try {
         } elseif ($action === 'login') {
             $mode = 'login';
             if (!$errors) {
-                $st = $mysqli->prepare('SELECT id, password_hash FROM users WHERE email = ?');
-                $st->bind_param('s', $email);
-                $st->execute();
-                $st->bind_result($id, $hash);
-                if ($st->fetch() && password_verify($password, $hash)) {
-                    $_SESSION['user_id'] = $id;
+                $st = $db->prepare('SELECT id, password_hash FROM users WHERE email = ?');
+                $st->execute([$email]);
+                $user = $st->fetch(PDO::FETCH_ASSOC);
+                if ($user && password_verify($password, $user['password_hash'])) {
+                    $_SESSION['user_id'] = (int)$user['id'];
                     $_SESSION['user_email'] = $email;
-                    $st->close();
                     header('Location: /?mode=cabinet');
                     exit;
                 }
-                $st->close();
                 $errors[] = t('err_invalid_credentials');
             }
         } elseif ($action === 'update_email') {
@@ -327,20 +305,15 @@ try {
                 $errors[] = t('err_invalid_email');
             }
             if (!$errors) {
-                $st = $mysqli->prepare('SELECT id FROM users WHERE email = ? AND id <> ?');
-                $st->bind_param('si', $email, $uid);
-                $st->execute();
-                $st->store_result();
-                if ($st->num_rows > 0) {
+                $st = $db->prepare('SELECT id FROM users WHERE email = ? AND id <> ?');
+                $st->execute([$email, $uid]);
+                if ($st->fetchColumn() !== false) {
                     $errors[] = t('err_email_exists');
                 }
-                $st->close();
             }
             if (!$errors) {
-                $st = $mysqli->prepare('UPDATE users SET email = ? WHERE id = ?');
-                $st->bind_param('si', $email, $uid);
-                $st->execute();
-                $st->close();
+                $st = $db->prepare('UPDATE users SET email = ? WHERE id = ?');
+                $st->execute([$email, $uid]);
                 $_SESSION['user_email'] = $email;
                 header('Location: /?mode=cabinet&view=settings&saved=email');
                 exit;
@@ -355,22 +328,18 @@ try {
             $cur = (string)($_POST['current'] ?? '');
             $new = (string)($_POST['new'] ?? '');
             $confirm = (string)($_POST['confirm'] ?? '');
-            $st = $mysqli->prepare('SELECT password_hash FROM users WHERE id = ?');
-            $st->bind_param('i', $uid);
-            $st->execute();
-            $st->bind_result($hash);
-            $ok = $st->fetch() && password_verify($cur, $hash);
-            $st->close();
+            $st = $db->prepare('SELECT password_hash FROM users WHERE id = ?');
+            $st->execute([$uid]);
+            $hash = $st->fetchColumn();
+            $ok = $hash !== false && password_verify($cur, $hash);
             if (!$ok) {
                 $errors[] = t('err_invalid_credentials');
             } elseif ($new !== $confirm) {
                 $errors[] = t('err_password_mismatch');
             } else {
                 $nh = password_hash($new, PASSWORD_DEFAULT);
-                $st = $mysqli->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
-                $st->bind_param('si', $nh, $uid);
-                $st->execute();
-                $st->close();
+                $st = $db->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+                $st->execute([$nh, $uid]);
                 header('Location: /?mode=cabinet&view=settings&saved=password');
                 exit;
             }
@@ -382,7 +351,7 @@ try {
                 exit;
             }
             $cid = (int)($_POST['company_id'] ?? 0);
-            if ($cid > 0 && !ownCompany($mysqli, $cid, $uid)) {
+            if ($cid > 0 && !ownCompany($db, $cid, $uid)) {
                 $errors[] = t('err_no_company');
             } else {
                 $data = [];
@@ -437,32 +406,26 @@ try {
                     $isNew = $cid === 0;
                     $json = json_encode($data, JSON_UNESCAPED_UNICODE);
                     if (!$isNew) {
-                        $st = $mysqli->prepare('UPDATE companies SET data = ? WHERE id = ? AND user_id = ?');
-                        $st->bind_param('sii', $json, $cid, $uid);
+                        $st = $db->prepare('UPDATE companies SET data = ? WHERE id = ? AND user_id = ?');
+                        $st->execute([$json, $cid, $uid]);
                     } else {
-                        $st = $mysqli->prepare('INSERT INTO companies (user_id, data) VALUES (?, ?)');
-                        $st->bind_param('is', $uid, $json);
+                        $st = $db->prepare('INSERT INTO companies (user_id, data) VALUES (?, ?)');
+                        $st->execute([$uid, $json]);
                     }
-                    $st->execute();
                     if ($isNew) {
-                        $cid = $st->insert_id;
+                        $cid = (int)$db->lastInsertId();
                     }
-                    $st->close();
                     if ($logoName !== null) {
                         if (!$isNew) {
-                            $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
-                            $st->bind_param('ii', $cid, $uid);
-                            $st->execute();
-                            $st->bind_result($old);
-                            if ($st->fetch() && $old) {
+                            $st = $db->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+                            $st->execute([$cid, $uid]);
+                            $old = $st->fetchColumn();
+                            if ($old) {
                                 @unlink(UPLOADS_DIR . '/' . basename((string)$old));
                             }
-                            $st->close();
                         }
-                        $st = $mysqli->prepare('UPDATE companies SET img = ? WHERE id = ? AND user_id = ?');
-                        $st->bind_param('sii', $logoName, $cid, $uid);
-                        $st->execute();
-                        $st->close();
+                        $st = $db->prepare('UPDATE companies SET img = ? WHERE id = ? AND user_id = ?');
+                        $st->execute([$logoName, $cid, $uid]);
                     }
                     header('Location: /?mode=cabinet&view=companies&company=' . $cid . '&saved=company');
                     exit;
@@ -476,7 +439,7 @@ try {
                 exit;
             }
             $cid = (int)($_POST['company_id'] ?? 0);
-            if ($cid <= 0 || !ownCompany($mysqli, $cid, $uid)) {
+            if ($cid <= 0 || !ownCompany($db, $cid, $uid)) {
                 $errors[] = t('err_no_company');
             } elseif (!isset($_FILES['logo']) || $_FILES['logo']['error'] !== UPLOAD_ERR_OK) {
                 $errors[] = t('err_upload');
@@ -508,18 +471,14 @@ try {
                         if (!move_uploaded_file($f['tmp_name'], UPLOADS_DIR . '/' . $name)) {
                             $errors[] = t('err_upload');
                         } else {
-                            $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
-                            $st->bind_param('ii', $cid, $uid);
-                            $st->execute();
-                            $st->bind_result($old);
-                            if ($st->fetch() && $old) {
+                            $st = $db->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+                            $st->execute([$cid, $uid]);
+                            $old = $st->fetchColumn();
+                            if ($old) {
                                 @unlink(UPLOADS_DIR . '/' . basename((string)$old));
                             }
-                            $st->close();
-                            $st = $mysqli->prepare('UPDATE companies SET img = ? WHERE id = ? AND user_id = ?');
-                            $st->bind_param('sii', $name, $cid, $uid);
-                            $st->execute();
-                            $st->close();
+                            $st = $db->prepare('UPDATE companies SET img = ? WHERE id = ? AND user_id = ?');
+                            $st->execute([$name, $cid, $uid]);
                             header('Location: /?mode=cabinet&view=companies&company=' . $cid . '&saved=logo');
                             exit;
                         }
@@ -534,21 +493,17 @@ try {
                 exit;
             }
             $cid = (int)($_POST['company_id'] ?? 0);
-            if ($cid <= 0 || !ownCompany($mysqli, $cid, $uid)) {
+            if ($cid <= 0 || !ownCompany($db, $cid, $uid)) {
                 $errors[] = t('err_no_company');
             } else {
-                $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
-                $st->bind_param('ii', $cid, $uid);
-                $st->execute();
-                $st->bind_result($img);
-                if ($st->fetch() && $img) {
+                $st = $db->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+                $st->execute([$cid, $uid]);
+                $img = $st->fetchColumn();
+                if ($img) {
                     @unlink(UPLOADS_DIR . '/' . basename((string)$img));
                 }
-                $st->close();
-                $st = $mysqli->prepare('DELETE FROM companies WHERE id = ? AND user_id = ?');
-                $st->bind_param('ii', $cid, $uid);
-                $st->execute();
-                $st->close();
+                $st = $db->prepare('DELETE FROM companies WHERE id = ? AND user_id = ?');
+                $st->execute([$cid, $uid]);
                 header('Location: /?mode=cabinet&view=companies&saved=delete');
                 exit;
             }
@@ -560,11 +515,11 @@ try {
                 exit;
             }
             $did = (int)($_POST['document_id'] ?? 0);
-            if ($did > 0 && !ownDocument($mysqli, $did, $uid)) {
+            if ($did > 0 && !ownDocument($db, $did, $uid)) {
                 $errors[] = t('err_no_document');
             } else {
                 $eid = (int)($_POST['issuer_id'] ?? 0);
-                if ($eid <= 0 || !ownCompany($mysqli, $eid, $uid)) {
+                if ($eid <= 0 || !ownCompany($db, $eid, $uid)) {
                     $errors[] = t('err_no_company');
                 }
                 $data = [];
@@ -602,17 +557,15 @@ try {
                 if (!$errors) {
                     $json = json_encode($data, JSON_UNESCAPED_UNICODE);
                     if ($did > 0) {
-                        $st = $mysqli->prepare('UPDATE documents SET data = ?, issuer_id = ? WHERE id = ? AND issuer_id IN (SELECT id FROM companies WHERE user_id = ?)');
-                        $st->bind_param('siii', $json, $eid, $did, $uid);
+                        $st = $db->prepare('UPDATE documents SET data = ?, issuer_id = ? WHERE id = ? AND issuer_id IN (SELECT id FROM companies WHERE user_id = ?)');
+                        $st->execute([$json, $eid, $did, $uid]);
                     } else {
-                        $st = $mysqli->prepare('INSERT INTO documents (issuer_id, data) VALUES (?, ?)');
-                        $st->bind_param('is', $eid, $json);
+                        $st = $db->prepare('INSERT INTO documents (issuer_id, data) VALUES (?, ?)');
+                        $st->execute([$eid, $json]);
                     }
-                    $st->execute();
                     if ($did === 0) {
-                        $did = $st->insert_id;
+                        $did = (int)$db->lastInsertId();
                     }
-                    $st->close();
                     header('Location: /?mode=cabinet&view=documents&document=' . $did . '&saved=document');
                     exit;
                 }
@@ -626,17 +579,15 @@ try {
         $lid = (int)($_GET['id'] ?? 0);
         $path = null;
         if ($uid && $lid > 0) {
-            $st = $mysqli->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
-            $st->bind_param('ii', $lid, $uid);
-            $st->execute();
-            $st->bind_result($img);
-            if ($st->fetch() && $img) {
+            $st = $db->prepare('SELECT img FROM companies WHERE id = ? AND user_id = ?');
+            $st->execute([$lid, $uid]);
+            $img = $st->fetchColumn();
+            if ($img) {
                 $p = UPLOADS_DIR . '/' . basename((string)$img);
                 if (is_file($p)) {
                     $path = $p;
                 }
             }
-            $st->close();
         }
         if ($path === null) {
             http_response_code(404);
@@ -676,11 +627,13 @@ try {
         if ($did > 0) {
             // Document preview: issuer = my company (data + logo), bill-to =
             // the payer stored in the document's own fields.
-            $st = $mysqli->prepare('SELECT d.data, c.data, c.img FROM documents d JOIN companies c ON c.id = d.issuer_id WHERE d.id = ? AND c.user_id = ?');
-            $st->bind_param('ii', $did, $uid);
-            $st->execute();
-            $st->bind_result($dData, $cData, $cImg);
-            if ($st->fetch()) {
+            $st = $db->prepare('SELECT d.data AS document_data, c.data AS company_data, c.img FROM documents d JOIN companies c ON c.id = d.issuer_id WHERE d.id = ? AND c.user_id = ?');
+            $st->execute([$did, $uid]);
+            $previewRow = $st->fetch(PDO::FETCH_ASSOC);
+            if ($previewRow) {
+                $dData = $previewRow['document_data'];
+                $cData = $previewRow['company_data'];
+                $cImg = $previewRow['img'];
                 $row = json_decode((string)$cData, true) ?: [];
                 foreach (COMPANY_FIELDS as $f) {
                     if (array_key_exists($f, $row)) {
@@ -718,18 +671,18 @@ try {
                     }
                 }
             }
-            $st->close();
         } else {
             if ($cid > 0) {
-                $st = $mysqli->prepare('SELECT data, img FROM companies WHERE id = ? AND user_id = ?');
-                $st->bind_param('ii', $cid, $uid);
+                $st = $db->prepare('SELECT data, img FROM companies WHERE id = ? AND user_id = ?');
+                $st->execute([$cid, $uid]);
             } else {
-                $st = $mysqli->prepare('SELECT data, img FROM companies WHERE user_id = ? ORDER BY id LIMIT 1');
-                $st->bind_param('i', $uid);
+                $st = $db->prepare('SELECT data, img FROM companies WHERE user_id = ? ORDER BY id LIMIT 1');
+                $st->execute([$uid]);
             }
-            $st->execute();
-            $st->bind_result($cData, $cImg);
-            if ($st->fetch()) {
+            $companyRow = $st->fetch(PDO::FETCH_ASSOC);
+            if ($companyRow) {
+                $cData = $companyRow['data'];
+                $cImg = $companyRow['img'];
                 $row = json_decode((string)$cData, true) ?: [];
                 foreach (COMPANY_FIELDS as $f) {
                     if (array_key_exists($f, $row)) {
@@ -743,7 +696,6 @@ try {
                     }
                 }
             }
-            $st->close();
         }
 
         $settings = [
@@ -825,15 +777,12 @@ try {
     $cabDocument = null;
     $cabUid = $_SESSION['user_id'] ?? null;
     if ($cabUid) {
-        $st = $mysqli->prepare('SELECT id, data, img FROM companies WHERE user_id = ? ORDER BY id');
-        $st->bind_param('i', $cabUid);
-        $st->execute();
-        $res = $st->get_result();
-        while ($row = $res->fetch_assoc()) {
+        $st = $db->prepare('SELECT id, data, img FROM companies WHERE user_id = ? ORDER BY id');
+        $st->execute([$cabUid]);
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
             $row['data'] = json_decode((string)$row['data'], true) ?: [];
             $cabCompanies[] = $row;
         }
-        $st->close();
         $sel = (int)($_GET['company'] ?? $_POST['company_id'] ?? 0);
         foreach ($cabCompanies as $c) {
             if ((int)$c['id'] === $sel) {
@@ -841,20 +790,17 @@ try {
                 break;
             }
         }
-        $st = $mysqli->prepare(
+        $st = $db->prepare(
             'SELECT d.id, d.data, d.updated_at, d.issuer_id, c.data AS issuer_data
              FROM documents d JOIN companies c ON c.id = d.issuer_id
              WHERE c.user_id = ? ORDER BY d.id'
         );
-        $st->bind_param('i', $cabUid);
-        $st->execute();
-        $res = $st->get_result();
-        while ($row = $res->fetch_assoc()) {
+        $st->execute([$cabUid]);
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
             $row['data'] = json_decode((string)$row['data'], true) ?: [];
             $row['issuer_data'] = json_decode((string)$row['issuer_data'], true) ?: [];
             $cabDocuments[] = $row;
         }
-        $st->close();
         $dsel = (int)($_GET['document'] ?? $_POST['document_id'] ?? 0);
         foreach ($cabDocuments as $doc) {
             if ((int)$doc['id'] === $dsel) {
@@ -863,7 +809,6 @@ try {
             }
         }
     }
-    $mysqli->close();
 } catch (Throwable $ex) {
     $dbError = $ex->getMessage();
 }
