@@ -6,46 +6,41 @@
 - Author: Matteljay
 - Language: JavaScript with TypeScript definitions
 - IDE: Visual Studio Code
-- Homepage: https://libersystems.com
 
 ## Table of contents
 
-- [About](#About)
-- [Example](#Example)
+- [About](#about)
+- [Example](#example)
 - [Features](#features)
+- [Local development (Docker)](#local-development-docker)
+- [Production deployment](#production-deployment)
 - [Donation](#donation)
 - [Translation](#translation)
 - [Notes](#notes)
 
 ## About
 
-_invoice-pdfkit_ attempts to standardize and internationalize the creation of common business pdf documents. Retail articles and hourly job declarations often require documents such as: invoice, receipt, return checklist and refund proofs. Those can now be generated from three simple JavaScript objects: _company_, _order_ and _payment_, all very flexible with optional fields. Traditional bank transfer and cryptocurrency transactions on all layers are supported. Total amounts and optional tax compliance such as VAT and sales taxes are automatically calculated from your list of prices.
+_invoice-pdfkit_ attempts to standardize and internationalize the creation of common business pdf documents. Retail articles and hourly job declarations often require documents such as: invoice, price quotation, packing slip, receipt, return checklist and refund proofs. Those can now be generated from three simple JavaScript objects: _company_, _order_ and _payment_, all very flexible with optional fields. Traditional bank transfer and cryptocurrency transactions on all layers are supported. Total amounts and optional tax compliance such as VAT and sales taxes are automatically calculated from your list of prices.
 
-### Example
+## Example
 
-Generated minimal example pdf:
-![Simple PDF](screenshots/simple-pdf.png)
+![Invoice example page 1](screenshots/invoice1.png)
+![Invoice example page 2](screenshots/invoice2.png)
 
-Install this module in your project folder:
+Minimal code usage, install this module in your project folder:
 `npm i invoice-pdfkit`
 
-Minimal code example:
-
-```
+```js
 const tradePDF = require("invoice-pdfkit");
 const fs = require("fs");
 
-console.log("Language options: " + tradePDF.getLanguages());
-tradePDF.init({
-  logo: fs.readFileSync("test/logo.jpg"),
-  company: {
-    company: "Your Company Name",
-    email: "your@buzz.com",
-    web: "https://that-buzz.org",
-  },
-});
+const myCompany = {
+  company: "Your Awesome Name",
+  email: "your@buzz.com",
+  web: "https://that-buzz.org",
+};
 
-const pdfData = tradePDF.invoice({
+const myOrder = {
   id: "S4TIX8GX",
   date: {
     created: 1659372135311,
@@ -77,41 +72,107 @@ const pdfData = tradePDF.invoice({
     fedTax: 5.1,
     ship: 7.24,
   },
+};
+
+console.log("Language options: " + tradePDF.getLanguages());
+tradePDF.init({
+  logo: fs.existsSync("logo.jpg") ? fs.readFileSync("logo.jpg") : undefined,
+  company: myCompany,
+  currency: "EUR",
 });
+const pdfData = tradePDF.invoice(myOrder);
 fs.writeFileSync("simple.pdf", pdfData);
+console.log("Generated simple.pdf");
 ```
 
 More complete examples with PDF output are available in [test/](test/).
 If you clone this repo, `npm run tsstart` will regenerate the example files.
 
-### Features
+## Features
 
-- Easy to translate for your language, see the [locales/](locales/) folder.
+- Integration with the Node Package Manager: [invoice-pdfkit](https://www.npmjs.com/package/invoice-pdfkit)
+- Easy to translate for your language, see the [i18n/](i18n/) folder.
+- Web cabinet for companies and documents with live PDF preview.
 - Can be used to declare working hours as well as a list of articles and their prices.
 - Total price is automatically calculated, factoring in several price inputs.
 - Common types of VAT and sales tax fields are supported.
 - Exchange rate specification for final payment in a different currency (such as bitcoin) is supported.
 - QR-code support for both legacy bank transfers and crypto payments, especially useful for the long address payload of bitcoin lightning network invoices.
-- The memo field is used for some cryptocurrencies, payment reference or a note is used for bank transfers.
 - Short-form human readable crypto addresses such as Ethereum's ENS can be specified in either the _company_ or _payment_ object at the same location as the bank account number or IBAN/SEPA number.
-- A list of all supported fields can be found in the [types/](types/) folder. Typescript support is optional.
+- A list of all supported fields can be found in [types/main.d.ts](types/main.d.ts). TypeScript support is optional. Most of the fields are demonstrated by the example files.
 
-### Donation
+## Local development (Docker)
 
-This software is free as in transparent, open source and can be used per MIT license. Not free as in zero cost, 1000 lines of code didn't grow on a tree. Advertisements aren't integrated either. Buy the writer a coffee or whatever you consider reasonible if you decide to use it in the current or modified state. Further details in [CONTACT.md](CONTACT.md).
+This repository also ships a local Docker stack for the Inquistador cabinet:
 
-### Translation
+- `nginx` on `:80` — `^/(api|health)` and `^/(template|i18n|fonts)` go to node,
+  everything else to PHP.
+- `php` — cabinet UI + database access ([php-app/](php-app/)): companies,
+  documents and settings. Documents live in the `documents` table; the
+  document type (currently `invoice`) only matters for storage and PDF
+  generation. `POST`/`GET /preview/` renders the current user's PDF by
+  forwarding the cabinet data to node.
+- `node` — [server.js](server.js) renders PDF only (`POST /api/render/invoice`),
+  no database access, no storage of client data.
+- `mysql` — the client data.
+
+Documents created in the cabinet can store `document_number` and
+`document_date` directly in `documents.data`. When they are set, the PDF
+header uses them instead of `order.id`/`order.date.created`; an empty date
+falls back to the current day. All PDF dates are formatted as `dd.mm.yyyy`.
+
+Start the stack with `docker compose up -d --build`. `src/` and `server.js` are
+baked into the node image, so after editing them rebuild the service
+(`docker compose up -d --build node`); `public/` and `php-app/public/` are bind-mounted and apply
+without a rebuild.
+
+### MySQL data persistence
+
+Client data lives in the named Docker volume `invoice-pdfkit_mysql-data`
+(declared as `mysql-data` in `docker-compose.yml`). Named volumes survive both
+`docker compose up --build` and `docker compose down`, so a rebuild never wipes
+the database. Data is lost only when a volume is explicitly removed:
+
+- `docker compose down -v` / `docker compose down --volumes`;
+- `docker volume prune` / `docker system prune --volumes`;
+- the **Down** action in PhpStorm (Services → Compose node → Down), which is
+  documented to remove volumes too. Prefer **Stop**/**Restart**, and use the
+  **Run** button (Shift+F10) to start/recreate containers.
+
+To make the database volume indestructible, declare it external — Compose never
+removes external volumes, even with `-v`:
+
+```yaml
+volumes:
+  mysql-data:
+    external: true
+    name: invoice-pdfkit_mysql-data
+```
+
+## Production deployment
+
+The target setup is a single server running MySQL, Node and PHP (for example,
+the same Docker Compose stack as in development). There are no throughput or
+latency requirements — the expected load does not affect the architecture.
+
+## Donation
+
+This software is free as in transparent, open source and can be used per MIT license. Not free as in zero cost, 1000 lines of code didn't grow on a tree and no ads are integrated. Buy the writer a coffee or whatever you consider reasonable if you decide to use it in the current or modified state. Further details in [CONTACT.md](CONTACT.md).
+
+## Translation
 
 Currently supported languages:
 
 - English (GB, US, CA, AU, ...)
 - Dutch (NL and Flanders BE)
 - German (DE, AT, CH)
+- Spanish (ES)
+- Russian (RU)
 
-To add your language, go to the [locales/](locales/) folder and create a folder specific to your language with a _translation.json_ inside. After forking and editing, feel free to create a Git pull request. Don't forget to add your language to this [README.md](README.md) as well.
+To add your language, go to the [i18n/](i18n/) folder and create a folder specific to your language with a _translation.json_ inside. After forking and editing, feel free to create a Git pull request. Don't forget to add your language to this [README.md](README.md) as well.
 
-### Notes
+## Notes
 
-Some fields may be missing for your region. For example: most dutch entrepreneurs are forced to register a "KvK" number. Simply add that text in the `company.registration` field: **KvK 0441.956.713**. Australian banks may require a "BSB" number for payments. Simply add that text to `payment.bankID` or `company.bankID`: **BSB 033-548**. If you still feel some essential fields are missing, a Git pull request is welcome.
+Some fields may be missing for your region. For example: most dutch entrepreneurs are forced to register a KvK number. Simply add that text in the `company.registration` field: "KvK 0441.956.713". Australian banks may require a BSB number for payments. Simply add that text to `payment.bankID` or `company.bankID`: "BSB 033-548". All supported fields can be found here: [types/main.d.ts](types/main.d.ts). If you still feel some essential fields are missing, a Git pull request is welcome.
 
-The source code includes a reasonibly advanced flex-table implementation for pdfkit, see the module [src/flex-table.js](src/flex-table.js) this may be used in your own projects.
+The source code includes a reasonably advanced flex-table implementation for pdfkit, see the module [src/flex-table.js](src/flex-table.js) this may be used in your own projects.

@@ -1,26 +1,20 @@
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
-const { t, config, setDocHelper, docH, dt } = require("./globals");
+const path = require("path");
+const { t, showDate, config, setDocHelper, docH, dt } = require("./globals");
 
-const Title = require("./sections/title");
-const Logo = require("./sections/logo");
-const Company = require("./sections/company");
-const Order = require("./sections/order");
-const Destination = require("./sections/destination");
+const htmlZone = require("./htmlZone");
 const { calcItems, Prices } = require("./sections/items");
 const { calcTotals, Totals } = require("./sections/totals");
 const Note = require("./sections/note");
 const { PayQR, PayDetails, getDetails } = require("./sections/payment");
-const {
-  Terms,
-  getPageIndicatorHeight,
-  PageNumbers,
-} = require("./sections/terms");
 
-const localesPath = __dirname + "/../locales";
+const i18nPath = __dirname + "/../i18n";
+const defaultFont = path.join(__dirname, "../fonts/OpenSans-Regular.ttf");
+const defaultFontBold = path.join(__dirname, "../fonts/OpenSans-Bold.ttf");
 const getLanguages = () => {
   if (!config.languageOptions)
-    config.languageOptions = fs.readdirSync(localesPath);
+    config.languageOptions = fs.readdirSync(i18nPath);
   return config.languageOptions;
 };
 
@@ -28,12 +22,12 @@ const init = (settings) => {
   config.company = settings.company;
   config.logo = settings.logo;
   const lang = settings.language || "en"; // Set fallback language
-  config.languageData = require(`${localesPath}/${lang}/translation.json`);
+  config.languageData = require(`${i18nPath}/${lang}/translation.json`);
   config.locale = settings.locale || "en-US";
   config.currency = settings.currency;
   config.page = settings.page;
-  config.fontName = settings.fontName || "Helvetica";
-  config.fontNameBold = settings.fontNameBold || "Helvetica-Bold";
+  config.fontName = settings.fontName || defaultFont;
+  config.fontNameBold = settings.fontNameBold || defaultFontBold;
   config.fontSize = settings.fontSize || 11;
   config.defaultMargins = {
     top: 30,
@@ -44,16 +38,23 @@ const init = (settings) => {
   config.initialized = true;
 };
 
+const quote = (...args) => generate((docType = dt.QUOTE), ...args);
 const invoice = (...args) => generate((docType = dt.INVOICE), ...args);
 const packing = (...args) => generate((docType = dt.PACKING), ...args);
 const ret = (...args) => generate((docType = dt.RETURN), ...args);
 const receipt = (...args) => generate((docType = dt.RECEIPT), ...args);
 const refund = (...args) => generate((docType = dt.REFUND), ...args);
 
-const generate = (docType, order, payment) => {
-  if (!order || typeof order !== "object")
-    throw Error("Missing object parameter: order");
-  if (!config.initialized) throw Error("Need to init() before generate()");
+const generate = (docType, order, payment) =>
+  new Promise((resolve, reject) => {
+    if (!order || typeof order !== "object") {
+      reject(Error("Missing object parameter: order"));
+      return;
+    }
+    if (!config.initialized) {
+      reject(Error("Need to init() before generate()"));
+      return;
+    }
   config.docType = docType;
   const doc = new PDFDocument({
     bufferPages: true,
@@ -62,44 +63,44 @@ const generate = (docType, order, payment) => {
     ...config.page,
   });
   setDocHelper(doc);
-  doc.page.margins.bottom += getPageIndicatorHeight(doc);
+  doc.font(config.fontName);
   //
-  // Section
-  Title(doc);
-  Logo(doc);
-  // Increased top margin for following pages (visually appealing)
-  doc.page.margins.top *= 2;
-  //doc.page.margins.top = doc.y / 2;
+  // Section: header — rendered from public/header.html (prototype) with
+  // this client's cabinet data; the file is the layout source.
+  htmlZone.renderHeader(doc, {
+    company: config.company || {},
+    bill: (order && order.bill) || {},
+    ship: (order && order.ship) || {},
+    order: {
+      id: order.id,
+      ref: order.ref,
+      clientID: order.clientID,
+      salesRep: order.salesRep,
+      date: {
+        created: showDate((order.date && order.date.created) || new Date()),
+        due: showDate(order.date && order.date.due),
+      },
+    },
+  });
   //
-  // Section
-  const companyPos = Company(doc);
-  docH.jumpStart(companyPos);
-  let billPos, shipPos;
-  if (config.docType === dt.PACKING) {
-    shipPos = Destination(doc, order.ship, t("ship_to"), false);
-    billPos = Destination(doc, order.bill, t("bill_to"), true);
-  } else if (config.docType === dt.RETURN) {
-    const { company } = config;
-    if (company.ship) {
-      shipPos = Destination(doc, company.ship, t("ship_to"), false);
-      billPos = Destination(doc, company, t("bill_to"), true);
-    } else {
-      shipPos = Destination(doc, company, t("ship_to"), false);
-    }
-  } else if (config.docType === dt.REFUND) {
-    billPos = Destination(doc, order.bill, t("bill_to"), false);
-  } else {
-    billPos = Destination(doc, order.bill, t("bill_to"), false);
-    shipPos = Destination(doc, order.ship, t("ship_to"), true);
-  }
-  const orderPos = Order(doc, order);
-  docH.jumpBelow(companyPos, billPos, shipPos, orderPos);
-  //
-  // Section
+  // Section: body (pdfkit — items table + sums)
   const itemsData = calcItems(order);
-  const totalsData = calcTotals(doc, order, itemsData);
-  const pricesPos = Prices(doc, order, itemsData, totalsData);
-  const totalsPos = Totals(doc, order, totalsData);
+  let totalsPos;
+  if (order.items?.length) {
+    const totalsData = calcTotals(doc, order, itemsData);
+    Prices(doc, order, itemsData);
+    totalsPos = Totals(doc, order, totalsData);
+  } else {
+    doc.font(config.fontNameBold);
+    doc.fontSize(config.fontSize);
+    doc.text(t("add_items_for_total"), doc.page.margins.left, doc.y, {
+      width: docH.printWidth,
+      align: "center",
+    });
+    doc.font(config.fontName);
+    doc.moveDown(1);
+    totalsPos = docH.returnPos({ width: 0 });
+  }
   const roomTotals = docH.printWidth - totalsPos.width;
   if (roomTotals > docH.printWidth / 2) {
     docH.jumpStart(totalsPos);
@@ -110,32 +111,36 @@ const generate = (docType, order, payment) => {
   const noteWidth =
     roomTotals > docH.printWidth / 2 ? roomTotals : docH.printWidth;
   Note(doc, order, noteWidth);
-  if (![dt.PACKING, dt.RETURN].includes(config.docType)) {
-    const payQRpos = PayQR(doc, payment);
-    const details = getDetails(doc, payment);
-    if (details.table.length) {
-      const isRoomDetails = details.width + docH.margin < docH.printWidth / 2;
-      if (!isRoomDetails) docH.jumpBelow(totalsPos, payQRpos);
-    }
-    const payDetailsPos = PayDetails(doc, details);
-    docH.jumpBelow(totalsPos, payDetailsPos);
-    //
-    // Section
-    Terms(doc, order);
+  const payQRpos = PayQR(doc, payment);
+  const details = getDetails(doc, payment);
+  if (details.table.length) {
+    const isRoomDetails = details.width + docH.margin < docH.printWidth / 2;
+    if (!isRoomDetails) docH.jumpBelow(totalsPos, payQRpos);
   }
+  const payDetailsPos = PayDetails(doc, details);
+  docH.jumpBelow(totalsPos, payQRpos, payDetailsPos);
   //
-  // Section
-  doc.page.margins.bottom -= getPageIndicatorHeight(doc);
-  PageNumbers(doc);
-  doc.page.margins.top /= 2;
+  // Section: footer — rendered from public/footer.html (prototype); starts
+  // right where the body ended.
+  const pages = String(doc._pageBuffer.length);
+  htmlZone.renderFooter(doc, {
+    company: config.company || {},
+    document: order.bill || {},
+    // documentJson: JSON.stringify(order.bill || {}, null, 2),
+    page: pages,
+    pages,
+  });
+  const chunks = [];
+  doc.on("data", (chunk) => chunks.push(chunk));
+  doc.on("end", () => resolve(Buffer.concat(chunks)));
+  doc.on("error", reject);
   doc.end();
-  const data = doc.read();
-  return data;
-};
+  });
 
 module.exports = {
-  init,
   getLanguages,
+  init,
+  quote,
   invoice,
   packing,
   return: ret,

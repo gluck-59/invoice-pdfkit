@@ -1,6 +1,19 @@
 const { t, config, showMoney, docH, dt } = require("../globals");
 const drawFlexTable = require("../flex-table");
-const { isTemplateMiddle } = require("typescript");
+
+const TABLE_MARGIN = 50 * 0.75; // 50px -> PDF points
+
+// need docker compose up -d --build node
+const COLUMN_WIDTHS = {
+  id: 50,
+  qty: 40,
+  qtyShip: 40,
+  price: 82,
+  discount: 40,
+  tax: 48,
+  total: 92,
+  return: 55,
+};
 
 const calcItems = (order) => {
   if (!order.items.length) return {};
@@ -12,8 +25,15 @@ const calcItems = (order) => {
 const calcPacking = (order) => {
   const firstItem = order.items[0];
   const header = [t("item_id"), t("item_desc")];
-  if (!!firstItem.qty) header.push(t("item_qty"));
-  if (!!firstItem.qtyShip) header.push(t("item_qtyShip"));
+  const widths = [COLUMN_WIDTHS.id, undefined];
+  if (!!firstItem.qty) {
+    header.push(t("item_qty"));
+    widths.push(COLUMN_WIDTHS.qty);
+  }
+  if (!!firstItem.qtyShip) {
+    header.push(t("item_qtyShip"));
+    widths.push(COLUMN_WIDTHS.qtyShip);
+  }
   const table = [];
   for (const item of order.items) {
     const line = [item.id, item.desc];
@@ -21,16 +41,17 @@ const calcPacking = (order) => {
     if (!!firstItem.qtyShip) line.push(item.qtyShip);
     table.push(line);
   }
-  return { header, table };
+  return { header, table, widths };
 };
 
 const calcReturn = (order) => {
-  const { header, table } = calcPacking(order);
+  const { header, table, widths } = calcPacking(order);
   header.push("Return");
+  widths.push(COLUMN_WIDTHS.return);
   table.forEach((line) => line.push(""));
   const writeColumn = [];
   writeColumn[header.length - 1] = true;
-  return { header, table, writeColumn };
+  return { header, table, writeColumn, widths };
 };
 
 const calcPrices = (order) => {
@@ -38,9 +59,22 @@ const calcPrices = (order) => {
   const hasTax = order.items.reduce((a, i) => a || !!i.tax, false);
   //
   const header = [t("item_id"), t("item_desc"), t("item_qty"), t("item_price")];
-  if (hasDiscount) header.push(t("item_discount"));
-  if (hasTax) header.push(t("item_tax"));
+  const widths = [
+    COLUMN_WIDTHS.id,
+    undefined,
+    COLUMN_WIDTHS.qty,
+    COLUMN_WIDTHS.price,
+  ];
+  if (hasDiscount) {
+    header.push(t("item_discount"));
+    widths.push(COLUMN_WIDTHS.discount);
+  }
+  if (hasTax) {
+    header.push(t("item_tax"));
+    widths.push(COLUMN_WIDTHS.tax);
+  }
   header.push(t("item_total"));
+  widths.push(COLUMN_WIDTHS.total);
   //
   const table = [];
   const totals = [];
@@ -54,7 +88,7 @@ const calcPrices = (order) => {
     table.push(line);
   }
   const subtotal = totals.reduce((a, t) => a + t, 0);
-  return { header, table, subtotal };
+  return { header, table, subtotal, widths };
 };
 
 const calcArticleTotal = (item) => {
@@ -65,15 +99,13 @@ const calcArticleTotal = (item) => {
   return out;
 };
 
-const Prices = (doc, order, pricesData, totalsData) => {
+const Prices = (doc, order, pricesData) => {
   if (!order.items?.length || !pricesData) return docH.returnPos();
   const startPage = docH.getPageNumber();
+  doc.y += TABLE_MARGIN; // 50px top margin
   const startY = doc.y;
-  const { header, table } = pricesData;
+  const { header, table, widths } = pricesData;
   const cellMarginX = 6;
-  const preferredColumnWidths = [];
-  if (totalsData)
-    preferredColumnWidths[header.length - 1] = totalsData.lastColumnWidth;
   const onlyDescriptionColumn = Array(7).fill(false);
   onlyDescriptionColumn[1] = true;
   if (config.docType === dt.RETURN && !doc._acroform) doc.initForm();
@@ -91,14 +123,17 @@ const Prices = (doc, order, pricesData, totalsData) => {
     cellMarginX,
     boldHeader: true,
     boldFooter: false,
+    headerBackground: "#292EBA",
+    headerColor: "#ffffff",
     alignColumns: onlyDescriptionColumn.map((v) => (v ? "left" : "right")),
-    preferredColumnWidths,
+    preferredColumnWidths: widths,
     flipGray: false,
     minCellHeight: 0,
     headerEveryPage: true,
     writeColumn: pricesData.writeColumn,
   });
   return docH.returnPos({ startPage, startY });
+  doc.y += TABLE_MARGIN; // отстут после "Итого"
 };
 
-module.exports = { calcItems, Prices };
+module.exports = { calcItems, Prices, COLUMN_WIDTHS };

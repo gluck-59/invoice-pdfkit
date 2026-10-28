@@ -1,15 +1,3 @@
-type Settings = {
-  logo?: any;
-  company?: YourCompany;
-  language?: string;
-  locale?: string;
-  currency?: string;
-  page?: PDFDocumentOptions | undefined;
-  fontName?: string;
-  fontNameBold?: string;
-  fontSize?: number;
-};
-
 type Identity = {
   company?: string;
   name?: string;
@@ -36,13 +24,37 @@ type CompanyInfo = Identity & {
   ship?: Identity;
 };
 
+type Settings = {
+  logo?: any;
+  company?: CompanyInfo;
+  language?: string;
+  locale?: string;
+  currency?: string;
+  page?: PDFDocumentOptions | undefined;
+  fontName?: string;
+  fontNameBold?: string;
+  fontSize?: number;
+};
+
+type FlexDate = Date | number | string;
+
 type OrderDate = {
-  created?: number;
-  add?: number;
-  edit?: number;
-  due?: number;
-  paid?: number;
-  refunded?: number;
+  created?: FlexDate;
+  expire?: FlexDate;
+  due?: FlexDate;
+  paid?: FlexDate;
+  deliver?: FlexDate;
+  refunded?: FlexDate;
+};
+
+type OrderItem = {
+  id?: string;
+  desc?: string;
+  qty?: string;
+  qtyShip?: string;
+  price?: string;
+  discount?: string;
+  tax?: string;
 };
 
 type OrderTotal = {
@@ -56,23 +68,14 @@ type OrderTotal = {
   exchangePrecision?: number;
 };
 
-type OrderItem = {
-  id?: string;
-  desc?: string;
-  qty?: string;
-  qtyShip?: string;
-  price?: string;
-  discount?: string;
-  tax?: string;
-};
-
 type Order = {
   id?: string;
+  ref?: string;
+  purchase?: string;
   date?: OrderDate;
-  paymentID?: string;
-  trackingID?: string;
-  note?: string;
   clientID?: string;
+  salesRep?: string;
+  note?: string;
   bill?: Identity;
   ship?: Identity;
   items?: OrderItem[];
@@ -89,14 +92,22 @@ type Payment = {
 };
 
 declare module "TradePDF" {
-  function init(settings?: Settings): void;
   function getLanguages(): string[] | Buffer[] | fs.Dirent[];
-  function invoice(order?: Order, payment?: Payment): string | Buffer;
-  function packing(order?: Order): string | Buffer;
-  function ret(order?: Order): string | Buffer;
-  function receipt(order?: Order, payment?: Payment): string | Buffer;
-  function refund(order?: Order, payment?: Payment): string | Buffer;
-  export = { init, invoice, packing, return: ret, receipt, refund };
+  function init(settings?: Settings): void;
+  function quote(order?: Order): Promise<Buffer>;
+  function invoice(order?: Order, payment?: Payment): Promise<Buffer>;
+  function packing(order?: Order): Promise<Buffer>;
+  function ret(order?: Order): Promise<Buffer>;
+  function receipt(order?: Order, payment?: Payment): Promise<Buffer>;
+  function refund(order?: Order, payment?: Payment): Promise<Buffer>;
+  export = {
+    getLanguages,
+    init,
+    quote,
+    invoice,
+    packing,
+    return: ret,
+    receipt,
+    refund,
+  };
 }
-
-// EOF

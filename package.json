@@ -1,6 +1,6 @@
 {
   "name": "invoice-pdfkit",
-  "version": "1.0.0",
+  "version": "1.0.11",
   "description": "Generate an invoice, receipt or return PDF file with pdfkit",
   "main": "index.js",
   "scripts": {
@@ -11,12 +11,52 @@
   "author": "Matteljay",
   "license": "MIT",
   "dependencies": {
-    "pdfkit": "^0.13.0",
+    "pdfkit": "^0.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.7",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0",
     "typescript": "^4.8.4"
   },
-  "devDependencies": {
-    "@types/node": "^18.11.7"
-  }
+  "directories": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Matteljay/invoice-pdfkit.git"
+  },
+  "files": [
+    "src",
+    "i18n",
+    "types"
+  ],
+  "keywords": [
+    "business",
+    "payment",
+    "generate",
+    "invoice",
+    "quote",
+    "quotation",
+    "receipt",
+    "packing",
+    "return",
+    "refund",
+    "crypto",
+    "bitcoin",
+    "lightning",
+    "pdf",
+    "document",
+    "file"
+  ],
+  "funding": [
+    {
+      "type": "individual",
+      "url": "https://github.com/Matteljay/invoice-pdfkit/blob/main/CONTACT.md"
+    }
+  ],
+  "bugs": {
+    "url": "https://github.com/Matteljay/invoice-pdfkit/issues"
+  },
+  "homepage": "https://github.com/Matteljay/invoice-pdfkit#readme"
 }

@@ -1,9 +1,9 @@
 const { t, config, showMoney, docH, dt } = require("../globals");
 const drawFlexTable = require("../flex-table");
+const { COLUMN_WIDTHS } = require("./items");
 
 const calcTotals = (doc, order, pricesData) => {
   if ([dt.PACKING, dt.RETURN].includes(config.docType)) return;
-  const cellMarginX = 6;
   const table = [];
   const { subtotal } = pricesData;
   const calc = { total: subtotal, vat: 0, stateTax: 0, fedTax: 0 };
@@ -51,7 +51,7 @@ const calcTotals = (doc, order, pricesData) => {
     table.push([t("total") + ":", showMoney(orderTotal)]);
   } else {
     const key = `${t("total")} (${sumQty} ${t("units")}):`;
-    table.push(key, showMoney(orderTotal));
+    table.push([key, showMoney(orderTotal)]);
   }
   if (exchangeTo && exchangeRate) {
     const key = `${t("exchange")} (${exchangeTo}):`;
@@ -65,14 +65,7 @@ const calcTotals = (doc, order, pricesData) => {
   }
   let height = table.length * doc.heightOfString("X");
   height += doc.heightOfString("X");
-  const lastColTable = table.map((r) => r[1]).slice(0, -1);
-  const lastColFooter = table[table.length - 1][1];
-  const lastColTableWidth = docH.widthOfStrings(lastColTable) + 2 * cellMarginX;
-  doc.font(config.fontNameBold);
-  const lastColFooterWidth = doc.widthOfString(lastColFooter) + 2 * cellMarginX;
-  doc.font(config.fontName);
-  const lastColumnWidth = Math.max(lastColTableWidth, lastColFooterWidth);
-  const totalsData = { table, lastColumnWidth, height };
+  const totalsData = { table, height };
   return totalsData;
 };
 
@@ -85,6 +78,7 @@ const Totals = (doc, order, totalsData) => {
   const startPage = docH.getPageNumber();
   const startY = doc.y;
   const cellMarginX = 6;
+  const footerMinCellHeight = doc.heightOfString("X") * 2;
   const totalsTable = drawFlexTable({
     doc,
     fontName: config.fontName,
@@ -96,8 +90,11 @@ const Totals = (doc, order, totalsData) => {
     allowGrow: true,
     cellMarginX,
     boldFooter: true,
+    footerMinCellHeight,
+    footerBackground: "#292EBA",
+    footerColor: "#ffffff",
     alignColumns: "right",
-    preferredColumnWidths: [undefined, totalsData.lastColumnWidth],
+    preferredColumnWidths: [undefined, COLUMN_WIDTHS.total],
     flipGray: !(order.items.length % 2),
     headerEveryPage: false,
     writeColumn: false,

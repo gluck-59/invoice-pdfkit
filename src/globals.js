@@ -1,25 +1,48 @@
 const config = { initialized: false, company: {}, languageData: {} };
 
 const dt = {
-  INVOICE: 0,
-  PACKING: 1,
-  RETURN: 2,
-  RECEIPT: 3,
-  REFUND: 4,
+  QUOTE: 0,
+  INVOICE: 1,
+  PACKING: 2,
+  RETURN: 3,
+  RECEIPT: 4,
+  REFUND: 5,
 };
 
 const t = (key) => config.languageData[key];
 
-const showDate = (num) => {
-  if (!num) return "";
-  const date = new Date(num);
-  return !config.locale
-    ? date.toISOString().substring(0, 10)
-    : date.toLocaleDateString(config.locale);
+const pad2 = (n) => String(n).padStart(2, "0");
+const fmtDate = (d) => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
+const parseDate = (s) => {
+  if (!s) return null;
+  const str = String(s);
+  let m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return null;
+};
+const showDate = (value) => {
+  if (!value) return "";
+  let date;
+  if (value instanceof Date) date = value;
+  else if (typeof value === "number") date = new Date(value);
+  else date = parseDate(value);
+  if (!date || isNaN(date)) return "";
+  return fmtDate(date);
 };
 
-const showMoney = (num) =>
-  Number(num).toLocaleString(
+const NBSP = "\u00A0";
+
+const showMoney = (num) => {
+  const value = Number(num);
+  if (config.currency === "EUR" && Number.isFinite(value)) {
+    const sign = value < 0 ? "-" : "";
+    const [whole, fraction] = Math.abs(value).toFixed(2).split(".");
+    const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+    return `${sign}${grouped},${fraction}${NBSP}€`;
+  }
+  return value.toLocaleString(
     config.locale,
     config.currency
       ? {
@@ -28,6 +51,7 @@ const showMoney = (num) =>
         }
       : { minimumFractionDigits: "2", maximumFractionDigits: "2" }
   );
+};
 
 let docH = {};
 const setDocHelper = (doc) => {

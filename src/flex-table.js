@@ -16,10 +16,15 @@ type FlexTable = {
   cellMarginX?: number,
   boldHeader?: boolean,
   boldFooter?: boolean,
+  headerBackground?: string,
+  headerColor?: string,
+  footerBackground?: string,
+  footerColor?: string,
   alignColumns?: string | string[],
   preferredColumnWidths?: number | number[],
   flipGray?: boolean,
   minCellHeight?: number,
+  footerMinCellHeight?: number,
   headerEveryPage?: boolean,
   writeColumn?: boolean[],
 }
@@ -41,8 +46,11 @@ let arg,
 const drawFlexTable = (drawTableArguments) => {
   arg = drawTableArguments;
   doc = arg.doc;
-  plainFont = arg.fontName || "Helvetica";
-  boldFont = arg.fontNameBold || "Helvetica-Bold";
+  plainFont =
+    arg.fontName || require("path").join(__dirname, "../fonts/OpenSans-Regular.ttf");
+  boldFont =
+    arg.fontNameBold ||
+    require("path").join(__dirname, "../fonts/OpenSans-Bold.ttf");
   doubleXMargin = 2 * arg.cellMarginX;
   grayCounter = !arg.flipGray;
   columnWidths = getBaseWidths();
@@ -65,34 +73,41 @@ const drawFlexTable = (drawTableArguments) => {
 
 const printHeader = () => {
   if (arg.header) {
-    if (arg.boldHeader != false) doc.font(boldFont);
-    printRow(arg.header, false);
+    if (arg.boldHeader !== false) doc.font(boldFont);
+    printRow(arg.header, false, true);
     doc.font(plainFont);
   }
 };
 
 const printFooter = () => {
   if (arg.footer) {
-    if (arg.boldFooter != false) doc.font(boldFont);
-    printRow(arg.footer, false);
+    if (arg.boldFooter !== false) doc.font(boldFont);
+    printRow(arg.footer, false, false, true);
     doc.font(plainFont);
   }
 };
 
-const printRow = (row, allowWriting) => {
-  const { alignColumns, writeColumn, minCellHeight } = arg;
+const printRow = (row, allowWriting, isHeader = false, isFooter = false) => {
+  const { alignColumns, writeColumn, minCellHeight, footerMinCellHeight, allowWrap } = arg;
   const currentFontHeight = doc.heightOfString("X");
+  const canWrap = (i) => {
+    if (isHeader || isFooter) return false;
+    return Array.isArray(allowWrap) ? !!allowWrap[i] : allowWrap !== false;
+  };
   // Calculate cellHeights
   const cellHeights = [];
   row.forEach((cell, i) => {
     const width = columnWidths[i] - doubleXMargin;
-    const cellHeight = doc.heightOfString(cell, { width });
+    const cellHeight = canWrap(i)
+      ? doc.heightOfString(cell, { width })
+      : doc.heightOfString(cell, { lineBreak: false });
     //console.log(cell, columnWidths[i] - doubleXMargin, cellHeight);
     if (allowWriting && writeColumn[i]) cellHeights.push(currentFontHeight * 2);
     else cellHeights.push(cellHeight);
   });
   cellHeights.push(currentFontHeight); // force minimum
   if (minCellHeight) cellHeights.push(minCellHeight);
+  if (isFooter && footerMinCellHeight) cellHeights.push(footerMinCellHeight);
   const maxCellHeight = cellHeights.reduce((a, h) => (h > a ? h : a), 0);
   // Check new page required
   let accumPosX = tStart + arg.cellMarginX;
@@ -100,15 +115,26 @@ const printRow = (row, allowWriting) => {
     doc.addPage();
     if (arg.headerEveryPage) printHeader();
   }
-  // Paint gray background
-  const basePosY = doc.y;
+  // Paint background strictly inside this row's bounds
+  const rowTop = doc.y;
   grayCounter = !grayCounter;
   const gap = currentFontHeight - doc._fontSize;
-  if (grayCounter) {
-    doc
-      .rect(tStart, basePosY - gap, tWidth, maxCellHeight)
-      .fill("#eee")
-      .fill("black");
+  if (isHeader) {
+    if (arg.headerBackground) {
+      doc.rect(tStart, rowTop, tWidth, maxCellHeight).fill(arg.headerBackground);
+      doc.fillColor(arg.headerColor || "#000");
+    } else if (arg.headerColor) {
+      doc.fillColor(arg.headerColor);
+    }
+  } else if (isFooter) {
+    if (arg.footerBackground) {
+      doc.rect(tStart, rowTop, tWidth, maxCellHeight).fill(arg.footerBackground);
+      doc.fillColor(arg.footerColor || "#000");
+    } else if (arg.footerColor) {
+      doc.fillColor(arg.footerColor);
+    }
+  } else if (grayCounter) {
+    doc.rect(tStart, rowTop, tWidth, maxCellHeight).fill("#eee").fill("black");
   }
   // Start printing text
   row.forEach((cell, i) => {
@@ -121,17 +147,21 @@ const printRow = (row, allowWriting) => {
       const height = cellHeights[i] - gap - 2;
       //console.log(cell, accumPosX, maxCellHeight, marginY, width, align);
       doc
-        .formText("item", accumPosX + 2, basePosY + marginY, width, height, {
+        .formText("item", accumPosX + 2, rowTop + marginY, width, height, {
           align,
           value: cell,
         })
-        .rect(accumPosX + 2, basePosY + marginY, width, height)
+        .rect(accumPosX + 2, rowTop + marginY, width, height)
         .stroke();
     } else if (cell || cell === 0) {
-      doc.text(cell, accumPosX, basePosY + marginY, { width, align });
+      const textOptions = { width, align };
+      if (!canWrap(i)) textOptions.lineBreak = false;
+      doc.text(cell, accumPosX, rowTop + marginY, textOptions);
     }
-    doc.y += marginY;
   });
+  if (isHeader || isFooter) doc.fillColor("black");
+  // Advance exactly to the bottom of this row (no per-cell drift)
+  doc.y = rowTop + maxCellHeight;
 };
 
 const growColumnsToLimits = () => {
@@ -221,12 +251,12 @@ const limitTable = () => {
 const getBaseWidths = () => {
   const columnWidths = [];
   if (arg.header) {
-    if (arg.boldHeader != false) doc.font(boldFont);
+    if (arg.boldHeader !== false) doc.font(boldFont);
     updateColumnWidths(columnWidths, arg.header);
     doc.font(plainFont);
   }
   if (arg.footer) {
-    if (arg.boldFooter != false) doc.font(boldFont);
+    if (arg.boldFooter !== false) doc.font(boldFont);
     updateColumnWidths(columnWidths, arg.footer);
     //console.log(columnWidths);
     doc.font(plainFont);
