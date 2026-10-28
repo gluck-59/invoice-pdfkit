@@ -2,9 +2,9 @@
 declare(strict_types=1);
 session_start();
 
-const I18N_DIR = '/var/www/i18n';
 const LANG_COOKIE = 'pdf-lang';
-const UPLOADS_DIR = '/var/www/uploads';
+define('I18N_DIR', dirname(__DIR__) . '/i18n');
+define('UPLOADS_DIR', dirname(__DIR__) . '/uploads');
 const LOGO_MAX_BYTES = 2097152; // 2 MB
 const LOGO_EXTS = ['jpg', 'png', 'gif', 'svg'];
 // Company field set mirrors DEMO.company in server.js.

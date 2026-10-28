@@ -1,178 +1,58 @@
-# Invoice-pdfkit
+# Inquistador
 
-## Business document generator
+Веб-сервис для создания и хранения PDF-документов для бизнеса.
 
-- License: MIT License
-- Author: Matteljay
-- Language: JavaScript with TypeScript definitions
-- IDE: Visual Studio Code
+## Возможности
 
-## Table of contents
+- Регистрация и вход по e-mail и паролю.
+- Хранение реквизитов ваших компаний.
+- Создание инвойсов с позициями, количеством, ценой, скидкой и НДС.
+- Предпросмотр готового PDF прямо в браузере.
+- Мультиязычный интерфейс.
+- Мобильная/десктопная вёрстка, переключение светлой/тёмной темы.
+- Другие типы документов — упаковочный лист, форма возврата, квитанция, возврат средств — планируются.
 
-- [About](#about)
-- [Example](#example)
-- [Features](#features)
-- [Local development (Docker)](#local-development-docker)
-- [Production deployment](#production-deployment)
-- [Donation](#donation)
-- [Translation](#translation)
-- [Notes](#notes)
+## Технический стек
 
-## About
+- `nginx` — reverse proxy и статика.
+- `php` — веб-интерфейс, авторизация, работа с базой данных.
+- `node` — генерация PDF.
+- `mysql` — хранение пользователей, компаний и документов.
 
-_invoice-pdfkit_ attempts to standardize and internationalize the creation of common business pdf documents. Retail articles and hourly job declarations often require documents such as: invoice, price quotation, packing slip, receipt, return checklist and refund proofs. Those can now be generated from three simple JavaScript objects: _company_, _order_ and _payment_, all very flexible with optional fields. Traditional bank transfer and cryptocurrency transactions on all layers are supported. Total amounts and optional tax compliance such as VAT and sales taxes are automatically calculated from your list of prices.
+## Быстрый старт
 
-## Example
+1. Скопируйте настройки окружения:
+   ```bash
+   cp .env.example .env
+   cp docker-compose.yml.example docker-compose.yml
+   ```
+2. Отредактируйте `.env` — задайте пароли MySQL и при необходимости `RENDER_TOKEN`.
+3. Запустите стек:
+   ```bash
+   docker compose up -d --build
+   ```
+4. Откройте `http://localhost:8080`.
 
-![Invoice example page 1](screenshots/invoice1.png)
-![Invoice example page 2](screenshots/invoice2.png)
+## Использование
 
-Minimal code usage, install this module in your project folder:
-`npm i invoice-pdfkit`
+1. Зарегистрируйтесь.
+2. Создайте компанию-исполнителя в разделе **Компании**.
+3. Перейдите в **Документы**, выберите компанию и заполните инвойс.
+4. Нажмите **Preview**, чтобы открыть PDF, или сохраните документ для повторного использования.
 
-```js
-const tradePDF = require("invoice-pdfkit");
-const fs = require("fs");
+## Переводы
 
-const myCompany = {
-  company: "Your Awesome Name",
-  email: "your@buzz.com",
-  web: "https://that-buzz.org",
-};
+Интерфейс доступен на английском, немецком, испанском, голландском и русском языках. Чтобы добавить язык, создайте каталог в `i18n/` с файлом `translation.json` и добавьте язык в список в README.
 
-const myOrder = {
-  id: "S4TIX8GX",
-  date: {
-    created: 1659372135311,
-    due: 1655118412147,
-  },
-  bill: {
-    company: "SomeTarget Inc.",
-    email: "star@buzz.com",
-  },
-  items: [
-    {
-      id: "w85",
-      desc: "Expensive Watch",
-      tax: "21",
-      qty: "18",
-      price: "2545.25",
-    },
-    {
-      id: "s63",
-      desc: "Repair service in hours",
-      tax: "9",
-      qty: "2",
-      price: "32.0",
-    },
-  ],
-  total: {
-    discount: 41,
-    stateTax: 10,
-    fedTax: 5.1,
-    ship: 7.24,
-  },
-};
+## Переменные окружения
 
-console.log("Language options: " + tradePDF.getLanguages());
-tradePDF.init({
-  logo: fs.existsSync("logo.jpg") ? fs.readFileSync("logo.jpg") : undefined,
-  company: myCompany,
-  currency: "EUR",
-});
-const pdfData = tradePDF.invoice(myOrder);
-fs.writeFileSync("simple.pdf", pdfData);
-console.log("Generated simple.pdf");
-```
+- `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` — подключение к MySQL.
+- `RENDER_TOKEN` — необязательный общий секрет между nginx/PHP и Node render API. В development можно оставить пустым.
 
-More complete examples with PDF output are available in [test/](test/).
-If you clone this repo, `npm run tsstart` will regenerate the example files.
+## Разработка
 
-## Features
-
-- Integration with the Node Package Manager: [invoice-pdfkit](https://www.npmjs.com/package/invoice-pdfkit)
-- Easy to translate for your language, see the [i18n/](i18n/) folder.
-- Web cabinet for companies and documents with live PDF preview.
-- Can be used to declare working hours as well as a list of articles and their prices.
-- Total price is automatically calculated, factoring in several price inputs.
-- Common types of VAT and sales tax fields are supported.
-- Exchange rate specification for final payment in a different currency (such as bitcoin) is supported.
-- QR-code support for both legacy bank transfers and crypto payments, especially useful for the long address payload of bitcoin lightning network invoices.
-- Short-form human readable crypto addresses such as Ethereum's ENS can be specified in either the _company_ or _payment_ object at the same location as the bank account number or IBAN/SEPA number.
-- A list of all supported fields can be found in [types/main.d.ts](types/main.d.ts). TypeScript support is optional. Most of the fields are demonstrated by the example files.
-
-## Local development (Docker)
-
-This repository also ships a local Docker stack for the Inquistador cabinet:
-
-- `nginx` on `:80` — `^/(api|health)` and `^/(template|i18n|fonts)` go to node,
-  everything else to PHP.
-- `php` — cabinet UI + database access ([php-app/](php-app/)): companies,
-  documents and settings. Documents live in the `documents` table; the
-  document type (currently `invoice`) only matters for storage and PDF
-  generation. `POST`/`GET /preview/` renders the current user's PDF by
-  forwarding the cabinet data to node.
-- `node` — [server.js](server.js) renders PDF only (`POST /api/render/invoice`),
-  no database access, no storage of client data.
-- `mysql` — the client data.
-
-Documents created in the cabinet can store `document_number` and
-`document_date` directly in `documents.data`. When they are set, the PDF
-header uses them instead of `order.id`/`order.date.created`; an empty date
-falls back to the current day. All PDF dates are formatted as `dd.mm.yyyy`.
-
-Start the stack with `docker compose up -d --build`. `src/` and `server.js` are
-baked into the node image, so after editing them rebuild the service
-(`docker compose up -d --build node`); `public/` and `php-app/public/` are bind-mounted and apply
-without a rebuild.
-
-### MySQL data persistence
-
-Client data lives in the named Docker volume `invoice-pdfkit_mysql-data`
-(declared as `mysql-data` in `docker-compose.yml`). Named volumes survive both
-`docker compose up --build` and `docker compose down`, so a rebuild never wipes
-the database. Data is lost only when a volume is explicitly removed:
-
-- `docker compose down -v` / `docker compose down --volumes`;
-- `docker volume prune` / `docker system prune --volumes`;
-- the **Down** action in PhpStorm (Services → Compose node → Down), which is
-  documented to remove volumes too. Prefer **Stop**/**Restart**, and use the
-  **Run** button (Shift+F10) to start/recreate containers.
-
-To make the database volume indestructible, declare it external — Compose never
-removes external volumes, even with `-v`:
-
-```yaml
-volumes:
-  mysql-data:
-    external: true
-    name: invoice-pdfkit_mysql-data
-```
-
-## Production deployment
-
-The target setup is a single server running MySQL, Node and PHP (for example,
-the same Docker Compose stack as in development). There are no throughput or
-latency requirements — the expected load does not affect the architecture.
-
-## Donation
-
-This software is free as in transparent, open source and can be used per MIT license. Not free as in zero cost, 1000 lines of code didn't grow on a tree and no ads are integrated. Buy the writer a coffee or whatever you consider reasonable if you decide to use it in the current or modified state. Further details in [CONTACT.md](CONTACT.md).
-
-## Translation
-
-Currently supported languages:
-
-- English (GB, US, CA, AU, ...)
-- Dutch (NL and Flanders BE)
-- German (DE, AT, CH)
-- Spanish (ES)
-- Russian (RU)
-
-To add your language, go to the [i18n/](i18n/) folder and create a folder specific to your language with a _translation.json_ inside. After forking and editing, feel free to create a Git pull request. Don't forget to add your language to this [README.md](README.md) as well.
-
-## Notes
-
-Some fields may be missing for your region. For example: most dutch entrepreneurs are forced to register a KvK number. Simply add that text in the `company.registration` field: "KvK 0441.956.713". Australian banks may require a BSB number for payments. Simply add that text to `payment.bankID` or `company.bankID`: "BSB 033-548". All supported fields can be found here: [types/main.d.ts](types/main.d.ts). If you still feel some essential fields are missing, a Git pull request is welcome.
-
-The source code includes a reasonably advanced flex-table implementation for pdfkit, see the module [src/flex-table.js](src/flex-table.js) this may be used in your own projects.
+- Файлы `php-app/public/`, `i18n/`, `fonts/` и `public/` примонтированы как volumes: изменения применяются без пересборки образов.
+- `server.js` и каталог `src/` копируются в образ `node` при сборке. После их изменения выполните:
+  ```bash
+  docker compose up -d --build node
+  ```

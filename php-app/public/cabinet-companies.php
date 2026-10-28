@@ -11,7 +11,7 @@ if (!defined('CABINET_PART')) { http_response_code(404); exit; }
   <div class="cab-item<?= $cabCompany && (int)$cabCompany['id'] === (int)$c['id'] ? ' sel' : '' ?>" data-id="<?= (int)$c['id'] ?>">
     <div class="cab-main">
       <div class="thumb">
-        <?php if (!empty($c['img'])): ?>
+        <?php if (!empty($c['img']) && is_file(UPLOADS_DIR.'/'.basename($c['img']))): ?>
           <img src="/?mode=logo&id=<?= (int)$c['id'] ?>" alt="logo">
         <?php else: ?>
           <div class="noimg">NO IMAGE</div>
@@ -45,7 +45,8 @@ if (!defined('CABINET_PART')) { http_response_code(404); exit; }
       <input type="file" name="logo" id="logo-file" accept=".jpg,.jpeg,.png,.gif,.svg" hidden data-upload-error="<?= e(t('err_upload')) ?>">
     </div>
     <div class="logo-preview">
-      <?php if ($cabCompany && !empty($cabCompany['img'])): ?>
+      <?php $previewFile = $cabCompany && !empty($cabCompany['img']) ? basename($cabCompany['img']) : '';
+      if ($previewFile && is_file(UPLOADS_DIR . '/' . $previewFile)): ?>
         <img src="/?mode=logo&id=<?= (int)$cabCompany['id'] ?>" alt="logo">
       <?php else: ?>
         <div class="noimg">NO IMAGE</div>

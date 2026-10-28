@@ -1,0 +1,19 @@
+Что умеет рендерер htmlZone.js (поддерживается):
+- Блочный/строчный поток, display: flex, gap, width, flex.
+- margin (в том числе сокращённый), margin-top/bottom/left/right.
+- padding (в том числе сокращённый), padding-top/right/bottom/left — для текстовых блоков.
+- background-color и color — для текстовых блоков (фон на всю ширину блока).
+- position: absolute — но только для <img> (логотип); рисуется поверх контента.
+- max-width, max-height, min-height у зоны.
+- font-size, font-weight, text-align.
+- {{placeholders}} и data-i18n для текста.
+- <img src="..."> для логотипа.
+- Inline-стили style="..." тоже работают.
+- Шрифты только те, что прописаны в config.fontName
+
+Что НЕ работает (будет проигнорировано):
+- padding/background-color/color у контейнеров с дочерними элементами.
+- border, border-radius, background (кроме background-color), line-height.
+- CSS Grid, float, position: absolute для текста/блоков.
+- @media (вырезается парсером).
+- Произвольные шрифты
